@@ -43,12 +43,12 @@ Working task list for the Tempo habit + mood PWA, broken into small chunks so ea
 - [x] 3d. Today's state indicator per habit (done / not done)
 
 ## Block 4 — Check-in flow
-- [ ] 4a. Modal sheet shell + progress bar + step navigation
-- [ ] 4b. Step 1: mood picker (5 faces + captions)
-- [ ] 4c. Step 2: daily prompt card (seeded pick from facts/reflection bank)
-- [ ] 4d. Step 3: habits checklist (inputs per qty type)
-- [ ] 4e. Step 4: summary screen
-- [ ] 4f. Auto-open logic: first visit of day + resume at next incomplete step
+- [x] 4a. Modal sheet shell + progress bar + step navigation
+- [x] 4b. Step 1: mood picker (5 faces + captions)
+- [x] 4c. Step 2: daily prompt card (seeded pick from facts/reflection bank)
+- [x] 4d. Step 3: habits checklist (inputs per qty type)
+- [x] 4e. Step 4: summary screen
+- [x] 4f. Auto-open logic: first visit of day + resume at next incomplete step
 
 ## Block 5 — Settings + polish
 - [ ] 5a. Settings view: rollover hour slider

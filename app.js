@@ -57,6 +57,52 @@ const HABIT_TYPES = [
   { id: 'percent', label: 'Percent', hint: '0–100%' },
 ];
 
+const MOOD_OPTIONS = [
+  { value: 1, emoji: '😞', caption: 'rough' },
+  { value: 2, emoji: '😕', caption: 'meh' },
+  { value: 3, emoji: '😐', caption: 'okay' },
+  { value: 4, emoji: '🙂', caption: 'good' },
+  { value: 5, emoji: '😄', caption: 'great' },
+];
+
+const FACTS = [
+  'Honey never spoils — archaeologists have found edible pots 3,000 years old.',
+  'A day on Venus is longer than its year.',
+  'Octopuses have three hearts and blue blood.',
+  'The Eiffel Tower grows about 15 cm taller in summer.',
+  'Bananas are berries; strawberries aren\'t.',
+  'A group of flamingos is called a flamboyance.',
+  'Cows have best friends and get stressed when separated.',
+  'Wombat poop is cube-shaped.',
+  'Sharks existed before trees.',
+  'There are more stars in the universe than grains of sand on Earth.',
+  'Sea otters hold hands when they sleep so they don\'t drift apart.',
+  'Your stomach gets a new lining every few days.',
+  'A blue whale\'s heart is the size of a small car.',
+  'Butterflies taste with their feet.',
+  'The shortest war in history lasted 38 minutes.',
+  'Antarctica is the largest desert on Earth.',
+  'Sloths can hold their breath longer than dolphins.',
+  'A jiffy is an actual unit of time (1/100th of a second).',
+  'Koalas have fingerprints nearly identical to humans.',
+  'The fastest fish can outswim a running cheetah.',
+];
+
+const PROMPTS = [
+  'What from last week are you most proud of?',
+  'What drained you most this week? Can you protect against it?',
+  'One small win from the past 7 days — what was it?',
+  'Did you spend time the way you wanted to this week?',
+  'Who do you want to thank from last week?',
+  'What did you learn about yourself recently?',
+  'Which habit felt easiest this week? Why?',
+  'Which habit felt hardest? What got in the way?',
+  'One moment from last week you\'d replay — which?',
+  'What\'s one thing you\'d do differently next week?',
+  'How did you take care of yourself this week?',
+  'What surprised you in the last few days?',
+];
+
 function uid() {
   return 'h_' + Math.random().toString(36).slice(2, 10);
 }
@@ -123,6 +169,48 @@ function currentStreak(habit) {
     day = daysAgo(day, 1);
   }
   return streak;
+}
+
+function ensureTodayLog() {
+  const key = currentDayKey();
+  if (!state.logs[key]) {
+    const seed = strHash(key);
+    const isReflect = seed % 2 === 0;
+    state.logs[key] = {
+      mood: null,
+      note: '',
+      promptKind: isReflect ? 'reflect' : 'fact',
+      promptText: isReflect
+        ? PROMPTS[seed % PROMPTS.length]
+        : FACTS[seed % FACTS.length],
+      habits: {},
+      steps: { mood: false, prompt: false, habits: false },
+      completedAt: null,
+    };
+  } else {
+    // Backfill shape for older logs so steps check is safe.
+    const log = state.logs[key];
+    if (!log.steps) log.steps = { mood: !!log.mood, prompt: false, habits: false };
+    if (!log.habits) log.habits = {};
+    if (log.promptText == null) {
+      const seed = strHash(key);
+      const isReflect = seed % 2 === 0;
+      log.promptKind = isReflect ? 'reflect' : 'fact';
+      log.promptText = isReflect
+        ? PROMPTS[seed % PROMPTS.length]
+        : FACTS[seed % FACTS.length];
+    }
+  }
+  return state.logs[key];
+}
+
+function nextIncompleteStep() {
+  const log = state.logs[currentDayKey()];
+  if (!log) return 0;
+  if (!log.steps?.mood) return 0;
+  if (!log.steps?.prompt) return 1;
+  if (!log.steps?.habits) return 2;
+  return null;
 }
 
 function todayStateText(habit) {
@@ -276,6 +364,32 @@ function renderHome() {
   });
   view.appendChild(h('h1', 'Today'));
   view.appendChild(h('p', { class: 'muted', style: { marginBottom: '16px' } }, displayDate));
+
+  // Check-in status card
+  const incomplete = nextIncompleteStep();
+  const log = state.logs[currentDayKey()];
+  if (incomplete !== null) {
+    view.appendChild(h('button', {
+      class: 'primary block',
+      style: { marginBottom: '16px' },
+      onClick: () => openCheckIn(),
+    }, log && log.steps?.mood ? 'Resume check-in' : 'Start today\'s check-in'));
+  } else if (log) {
+    const face = MOOD_OPTIONS.find((m) => m.value === log.mood);
+    view.appendChild(h('div', { class: 'summary', style: { marginBottom: '16px' } },
+      h('div', { class: 'row between' },
+        h('div', null,
+          h('div', { class: 'small muted' }, 'Checked in'),
+          h('div', { style: { fontSize: '1.2rem', marginTop: '2px' } },
+            `${face?.emoji || '✨'} ${face?.caption || ''}`),
+        ),
+        h('button', {
+          class: 'ghost small',
+          onClick: () => openCheckIn(0),
+        }, 'Edit'),
+      ),
+    ));
+  }
 
   const active = state.habits.filter((x) => !x.archivedAt);
 
@@ -678,6 +792,272 @@ function renderSettings() {
   );
 }
 
+// ---- Check-in flow ----------------------------------------------------------
+
+let checkInOpen = false;
+let checkInStep = 0;              // 0 mood, 1 prompt, 2 habits, 3 summary
+let checkInDismissed = false;     // user tapped X — don't auto-reopen this session
+let checkInHabitBuffer = {};      // pending values while on step 2
+
+function openCheckIn(startStep = null) {
+  ensureTodayLog();
+  const log = state.logs[currentDayKey()];
+  checkInHabitBuffer = { ...(log.habits || {}) };
+  checkInOpen = true;
+  checkInStep = startStep ?? (nextIncompleteStep() ?? 3);
+  renderCheckIn();
+}
+
+function closeCheckIn(dismiss = true) {
+  checkInOpen = false;
+  if (dismiss) checkInDismissed = true;
+  const scrim = qs('.scrim');
+  if (scrim) scrim.remove();
+  render();
+}
+
+function maybeOpenCheckIn() {
+  if (checkInOpen || checkInDismissed) return;
+  if (nextIncompleteStep() !== null) openCheckIn();
+}
+
+function nextStep() {
+  const log = ensureTodayLog();
+  if (checkInStep === 0) {
+    if (!log.mood) { toast('Pick a mood first'); return; }
+    log.steps.mood = true;
+    save();
+    checkInStep = 1;
+  } else if (checkInStep === 1) {
+    log.steps.prompt = true;
+    save();
+    checkInStep = 2;
+  } else if (checkInStep === 2) {
+    log.habits = { ...checkInHabitBuffer };
+    log.steps.habits = true;
+    log.completedAt = new Date().toISOString();
+    save();
+    checkInStep = 3;
+  } else if (checkInStep === 3) {
+    closeCheckIn(false);
+    return;
+  }
+  renderCheckIn();
+}
+
+function prevStep() {
+  if (checkInStep > 0) {
+    checkInStep--;
+    renderCheckIn();
+  }
+}
+
+function renderCheckIn() {
+  const existing = qs('.scrim');
+  if (existing) existing.remove();
+  if (!checkInOpen) return;
+
+  const scrim = h('div', { class: 'scrim', onClick: (e) => {
+    if (e.target.classList.contains('scrim')) closeCheckIn();
+  }});
+  const sheet = h('div', { class: 'sheet' });
+
+  const progress = h('div', { class: 'progress' });
+  for (let i = 0; i < 4; i++) {
+    progress.appendChild(h('span', { class: i <= checkInStep ? 'active' : '' }));
+  }
+
+  sheet.appendChild(h('header', null,
+    h('strong', 'Today\'s check-in'),
+    progress,
+    h('button', {
+      class: 'ghost',
+      style: { padding: '6px 10px', minHeight: '36px' },
+      onClick: () => closeCheckIn(),
+      'aria-label': 'Close',
+    }, '✕'),
+  ));
+
+  const body = h('div', { class: 'body' });
+  if (checkInStep === 0) body.appendChild(renderMoodStep());
+  else if (checkInStep === 1) body.appendChild(renderPromptStep());
+  else if (checkInStep === 2) body.appendChild(renderHabitsStep());
+  else body.appendChild(renderSummaryStep());
+  sheet.appendChild(body);
+
+  const footer = h('footer');
+  if (checkInStep > 0 && checkInStep < 3) {
+    footer.appendChild(h('button', { class: 'ghost', onClick: prevStep }, 'Back'));
+  }
+  footer.appendChild(h('span', { class: 'grow' }));
+  const nextLabel =
+    checkInStep === 2 ? 'Finish' :
+    checkInStep === 3 ? 'Done' : 'Next';
+  footer.appendChild(h('button', { class: 'primary', onClick: nextStep }, nextLabel));
+  sheet.appendChild(footer);
+
+  scrim.appendChild(sheet);
+  document.body.appendChild(scrim);
+}
+
+function renderMoodStep() {
+  const log = ensureTodayLog();
+  const wrap = h('div', { class: 'step' });
+  wrap.appendChild(h('h2', { style: { color: 'var(--text)', fontSize: '1.25rem', margin: '4px 0 4px' } },
+    'How\'s today feeling?'));
+  wrap.appendChild(h('p', { class: 'small muted', style: { marginBottom: '12px' } },
+    'Tap the face that fits best.'));
+
+  const grid = h('div', { class: 'mood-grid' });
+  MOOD_OPTIONS.forEach((opt) => {
+    grid.appendChild(h('button', {
+      class: 'mood-btn' + (log.mood === opt.value ? ' selected' : ''),
+      type: 'button',
+      'aria-label': opt.caption,
+      onClick: () => { log.mood = opt.value; save(); renderCheckIn(); },
+    }, opt.emoji));
+  });
+  wrap.appendChild(grid);
+
+  const caption = log.mood
+    ? MOOD_OPTIONS.find((m) => m.value === log.mood).caption
+    : ' ';
+  wrap.appendChild(h('div', { class: 'mood-caption' }, caption));
+
+  return wrap;
+}
+
+function renderPromptStep() {
+  const log = ensureTodayLog();
+  const wrap = h('div', { class: 'step' });
+
+  wrap.appendChild(h('div', { class: 'prompt-card' },
+    h('div', { class: 'kicker' }, log.promptKind === 'reflect' ? 'Reflection' : 'Fun fact'),
+    h('p', {
+      style: { fontSize: '1.08rem', color: 'var(--text)', margin: '8px 0 0', lineHeight: '1.45' },
+    }, log.promptText),
+  ));
+
+  wrap.appendChild(h('label',
+    log.promptKind === 'reflect' ? 'Your answer (optional)' : 'Reaction or note (optional)'));
+  const ta = h('textarea', {
+    placeholder: log.promptKind === 'reflect'
+      ? 'Type your reflection…'
+      : 'What comes to mind?',
+  });
+  ta.value = log.note || '';
+  ta.addEventListener('input', () => { log.note = ta.value; save(); });
+  wrap.appendChild(ta);
+
+  return wrap;
+}
+
+function renderHabitsStep() {
+  const wrap = h('div', { class: 'step' });
+  wrap.appendChild(h('h2', {
+    style: { color: 'var(--text)', fontSize: '1.25rem', margin: '4px 0 4px' },
+  }, 'Habits for today'));
+  wrap.appendChild(h('p', { class: 'small muted', style: { marginBottom: '12px' } },
+    'Check off what happened. Skip any you don\'t want to track today.'));
+
+  const active = state.habits.filter((x) => !x.archivedAt);
+  if (active.length === 0) {
+    wrap.appendChild(h('p', 'No habits yet. Add some in the Habits tab.'));
+    return wrap;
+  }
+
+  const good = active.filter((x) => x.kind === 'good');
+  const bad  = active.filter((x) => x.kind === 'bad');
+
+  if (good.length) {
+    wrap.appendChild(h('div', {
+      class: 'section-head good', style: { margin: '12px 0 8px' },
+    }, h('span', { class: 'dot' }), 'Build'));
+    good.forEach((habit) => wrap.appendChild(renderHabitCheckRow(habit)));
+  }
+  if (bad.length) {
+    wrap.appendChild(h('div', {
+      class: 'section-head bad', style: { margin: '12px 0 8px' },
+    }, h('span', { class: 'dot' }), 'Break'));
+    bad.forEach((habit) => wrap.appendChild(renderHabitCheckRow(habit)));
+  }
+  return wrap;
+}
+
+function renderHabitCheckRow(habit) {
+  const row = h('div', {
+    class: 'check-row',
+    style: { '--habit-color': habit.color },
+  });
+  row.appendChild(h('div', { class: 'stripe' }));
+
+  row.appendChild(h('div', null,
+    h('div', { class: 'title' }, habit.title),
+    h('div', { class: 'meta small muted' }, habitMeta(habit)),
+  ));
+
+  const value = checkInHabitBuffer[habit.id];
+
+  if (habit.type === 'tick') {
+    const box = h('button', {
+      class: 'check-box' + (value ? ' on' : ''),
+      type: 'button',
+      'aria-pressed': value ? 'true' : 'false',
+      onClick: () => {
+        checkInHabitBuffer[habit.id] = !value;
+        renderCheckIn();
+      },
+    }, value ? '✓' : '');
+    row.appendChild(box);
+  } else if (habit.type === 'count') {
+    const input = h('input', {
+      class: 'qty-input', type: 'number', min: 0, step: 1,
+      inputmode: 'numeric', placeholder: '0',
+    });
+    input.value = value ?? '';
+    input.addEventListener('input', () => {
+      if (input.value === '') delete checkInHabitBuffer[habit.id];
+      else checkInHabitBuffer[habit.id] = Math.max(0, Number(input.value) || 0);
+    });
+    row.appendChild(input);
+  } else if (habit.type === 'percent') {
+    const input = h('input', {
+      class: 'qty-input', type: 'number', min: 0, max: 100, step: 1,
+      inputmode: 'numeric', placeholder: '0',
+    });
+    input.value = value ?? '';
+    input.addEventListener('input', () => {
+      if (input.value === '') { delete checkInHabitBuffer[habit.id]; return; }
+      checkInHabitBuffer[habit.id] = Math.min(100, Math.max(0, Number(input.value) || 0));
+    });
+    row.appendChild(input);
+  }
+
+  return row;
+}
+
+function renderSummaryStep() {
+  const log = ensureTodayLog();
+  const wrap = h('div', { class: 'step center' });
+  const face = log.mood ? MOOD_OPTIONS.find((m) => m.value === log.mood) : null;
+  const habitCount = Object.keys(log.habits || {}).length;
+  const doneCount = state.habits.filter(
+    (ht) => !ht.archivedAt && isHabitDoneForDay(ht, currentDayKey()),
+  ).length;
+
+  wrap.appendChild(h('div', { class: 'summary' },
+    h('div', { class: 'mood' }, face ? face.emoji : '✨'),
+    h('div', { style: { marginTop: '4px', color: 'var(--text)' } },
+      face ? face.caption : 'logged'),
+    h('p', { class: 'small muted', style: { marginTop: '12px', marginBottom: 0 } },
+      `${habitCount} habit${habitCount === 1 ? '' : 's'} logged · ${doneCount} on track today.`),
+  ));
+
+  wrap.appendChild(h('p', { style: { marginTop: '16px' } },
+    'Nice — see you tomorrow.'));
+  return wrap;
+}
+
 // ---- Service worker ---------------------------------------------------------
 
 function registerSW() {
@@ -696,6 +1076,7 @@ function init() {
   wireTabbar();
   render();
   registerSW();
+  maybeOpenCheckIn();
 }
 
 init();
