@@ -184,7 +184,7 @@ state.countdowns = [
 - [x] 21f. Test notification panel: "Send now" + delay picker (5s / 30s / 1m / 5m / 15m)
 
 ## Block 22 — Cron + E2E
-- [ ] 22a. `.github/workflows/reminder-tick.yml` — `*/15 * * * *`
+- [x] 22a. `.github/workflows/reminder-tick.yml` — `*/15 * * * *`
 - [ ] 22b. Trigger cron manually once to verify
 - [ ] 22c. E2E on phone (subscribe → time → push → tap); remove vapid-gen workflow
 

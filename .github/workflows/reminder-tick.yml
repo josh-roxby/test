@@ -1,0 +1,54 @@
+name: Reminder tick
+
+# Fires every 15 minutes, hitting /api/tick on the deployed Vercel app.
+# That endpoint iterates stored push subscriptions and sends daily reminders
+# to any user whose local time falls within ±7 minutes of their chosen time.
+#
+# Required repo config:
+#   - Variable (Repo Settings → Secrets and variables → Actions → Variables):
+#       APP_URL   e.g. https://tempo.vercel.app  (no trailing slash)
+#   - Secret (same page → Secrets tab):
+#       TICK_SECRET  same value you put in Vercel env vars
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Call /api/tick
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+          TICK_SECRET: ${{ secrets.TICK_SECRET }}
+        run: |
+          set -u
+          if [ -z "${APP_URL:-}" ]; then
+            echo "::error::APP_URL repo variable is not set"
+            exit 1
+          fi
+          if [ -z "${TICK_SECRET:-}" ]; then
+            echo "::error::TICK_SECRET repo secret is not set"
+            exit 1
+          fi
+
+          URL="${APP_URL%/}/api/tick"
+          echo "Pinging $URL"
+
+          HTTP=$(curl -sS -o /tmp/tick.json -w "%{http_code}" \
+            -H "Authorization: Bearer $TICK_SECRET" \
+            --max-time 30 \
+            "$URL")
+
+          echo "HTTP status: $HTTP"
+          echo "Body:"
+          cat /tmp/tick.json || true
+          echo
+
+          if [ "$HTTP" != "200" ]; then
+            echo "::error::tick failed with HTTP $HTTP"
+            exit 1
+          fi
