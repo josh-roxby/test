@@ -2500,8 +2500,26 @@ function renderRemindersSection() {
   }
 
   wrap.appendChild(h('p', { class: 'small muted' },
-    'Get a push reminder at your chosen time each day. Requires this PWA to be installed on your device (Android: "Add to Home screen"). ' +
-    'If push isn\'t granted or the browser doesn\'t support it, Tempo falls back to an in-app banner when you open the app past your reminder time.'));
+    'Get a push reminder at your chosen time each day. If push isn\'t available, Tempo falls back to an in-app banner when you open the app.'));
+
+  const details = h('details', { class: 'reminder-details' },
+    h('summary', null, 'Platform notes'),
+    h('ul', { class: 'small muted', style: { margin: '8px 0 0 18px', padding: 0, lineHeight: 1.5 } },
+      h('li', null,
+        h('strong', { style: { color: 'var(--text)' } }, 'Android Chrome: '),
+        'install to Home screen for reliable background delivery (Chrome menu → Add to Home screen).'),
+      h('li', null,
+        h('strong', { style: { color: 'var(--text)' } }, 'iOS Safari 16.4+: '),
+        'requires the PWA to be installed; background push may still be patchy on older OSes.'),
+      h('li', null,
+        h('strong', { style: { color: 'var(--text)' } }, 'Desktop: '),
+        'works in Chrome, Edge, and Firefox whenever the site is open.'),
+      h('li', null,
+        h('strong', { style: { color: 'var(--text)' } }, 'Battery savers: '),
+        'some Android OEMs (Samsung, Xiaomi) aggressively kill background Chrome — whitelist it if pushes go missing.'),
+    ),
+  );
+  wrap.appendChild(details);
 
   // Toggle row
   const toggleRow = h('div', {

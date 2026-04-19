@@ -129,7 +129,17 @@ label { display: block; font-size: 0.85rem; color: var(--muted); margin: 12px 0 
   color: var(--muted);
 }
 .tab.active { color: var(--text); background: var(--surface-2); }
-.tab-icon { font-size: 1.05rem; line-height: 1; }
+.tab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.tab-icon svg {
+  display: block;
+  width: 22px;
+  height: 22px;
+}
 .tab-label { font-size: 0.68rem; letter-spacing: 0.01em; }
 
 #gear {
@@ -138,12 +148,12 @@ label { display: block; font-size: 0.85rem; color: var(--muted); margin: 12px 0 
   z-index: 25;
   background: transparent; border: 1px solid transparent;
   color: var(--muted);
-  font-size: 1.2rem; line-height: 1;
   width: 40px; height: 40px; min-height: 40px;
   padding: 0;
   border-radius: 50%;
   display: grid; place-items: center;
 }
+#gear svg { display: block; width: 20px; height: 20px; }
 #gear:hover { color: var(--text); background: var(--surface); }
 #gear.active { color: var(--text); background: var(--surface-2); border-color: var(--border); }
 
@@ -284,6 +294,32 @@ label { display: block; font-size: 0.85rem; color: var(--muted); margin: 12px 0 
 .tile[class*="theme-"].theme-polka .tile-value,
 .tile[class*="theme-"].theme-tropical .tile-value {
   color: #1a0a1a;
+}
+
+/* Collapsible info sections (e.g. "Platform notes" in Settings) */
+.reminder-details {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.reminder-details summary {
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: var(--muted);
+  list-style: none;
+  user-select: none;
+}
+.reminder-details summary::-webkit-details-marker { display: none; }
+.reminder-details summary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 6px;
+  transition: transform 0.15s ease;
+}
+.reminder-details[open] summary::before {
+  transform: rotate(90deg);
 }
 
 /* In-app reminder nudge banner */
