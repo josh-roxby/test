@@ -2844,6 +2844,9 @@ function renderSettings() {
   }, 'Import from JSON'));
   view.appendChild(actions);
 
+  // --- Danger zone (full reset) ---
+  view.appendChild(renderDangerZone());
+
   return view;
 }
 
@@ -2905,6 +2908,75 @@ function renderBackupNudge() {
       onClick: exportJSON,
     }, 'Export now'),
   );
+}
+
+// ---- Danger zone (full device reset) ----------------------------------------
+
+function renderDangerZone() {
+  const wrap = h('div');
+  wrap.appendChild(h('h2', {
+    style: { marginTop: '32px', color: 'var(--bad)' },
+  }, 'Danger zone'));
+  wrap.appendChild(h('p', { class: 'small muted' },
+    'Clears everything on this device — habits, logs, diary, countdowns, reminders, and settings. Any exported JSON files on your device are NOT affected, so make sure you\'ve exported if you want a backup.'));
+  wrap.appendChild(h('button', {
+    class: 'block danger',
+    style: { marginTop: '10px' },
+    onClick: deleteAllData,
+  }, 'Delete all data'));
+  return wrap;
+}
+
+async function deleteAllData() {
+  const first = confirm(
+    'Delete ALL Tempo data on this device?\n\n' +
+    'This removes habits, logs, diary entries, countdowns, reminders, and every setting. ' +
+    'It cannot be undone.\n\n' +
+    'Any exported JSON backup is NOT affected.',
+  );
+  if (!first) return;
+  const second = confirm('Are you absolutely sure? This is permanent.');
+  if (!second) return;
+
+  try {
+    // Unregister push subscription (server-side cleanup + browser unsubscribe).
+    if (state.settings.reminder?.enabled || state.settings.reminder?.endpoint) {
+      try { await unsubscribeFromPush(); } catch (err) { console.warn('unsubscribe during reset failed', err); }
+    }
+
+    // Wipe persisted state.
+    try { localStorage.removeItem(STORAGE_KEY); } catch {}
+    try { navigator.clearAppBadge?.(); } catch {}
+
+    // Reset in-memory state.
+    state = defaultState();
+
+    // Reset UI state flags so modals/edits don't linger.
+    route = 'home';
+    viewingHabitId = null;
+    editingHabitId = null;
+    editingCountdownId = null;
+    checkInOpen = false;
+    checkInDismissed = false;
+    checkInHabitBuffer = {};
+    wrappedOpen = false;
+    wrappedStage = 0;
+    remindersBusy = false;
+    if (typeof testTimer !== 'undefined' && testTimer) {
+      try { clearTimeout(testTimer); } catch {}
+      testTimer = null;
+    }
+
+    // Close any open scrim / modal.
+    qsa('.scrim').forEach((el) => el.remove());
+
+    applyTheme();
+    render();
+    toast('All data cleared');
+  } catch (err) {
+    console.error(err);
+    toast(`Couldn't clear everything: ${err.message}`);
+  }
 }
 
 function handleImport(file) {
