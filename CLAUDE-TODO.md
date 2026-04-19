@@ -259,6 +259,7 @@ settings.reminder = {
 - [ ] 18c. `/api/unsubscribe.js` — POST handler: remove sub by endpoint
 - [ ] 18d. `/api/tick.js` — GET handler: verify TICK_SECRET, scan `sub:*`, filter due (timezone + ±7-min window + dedup), send via web-push, delete 410s
 - [ ] 18e. Add `/api/vapid-public.js` — GET returning `VAPID_PUBLIC_KEY` so the client can fetch it (avoids hardcoding)
+- [ ] 18f. `/api/test-send.js` — POST handler: looks up sub by endpoint in KV, fires a test push immediately (payload labelled "Tempo test 🧪")
 
 ## Block 19 — Service worker push + click handlers
 - [ ] 19a. `push` event listener: parse JSON payload `{ title, body, url }` → `registration.showNotification`
@@ -279,6 +280,7 @@ settings.reminder = {
 - [ ] 21c. Toggle ON flow: permission → subscribe → POST `/api/subscribe` → persist `endpoint` locally → confirm toast
 - [ ] 21d. Toggle OFF flow: `subscription.unsubscribe` → POST `/api/unsubscribe` → clear local `endpoint`
 - [ ] 21e. Error / status states: `denied`, `unsupported`, `pending`, `connected`, plus a re-sync button for the "connected on this device" case
+- [ ] 21f. **Test notification panel** (visible only when subscribed): "Send now" button + delay picker (5s / 30s / 1m / 5m / 15m) using client `setTimeout` → POST `/api/test-send`; label clearly that the tab must stay open for the delay
 
 ## Block 22 — GitHub Actions cron + end-to-end test
 - [ ] 22a. `.github/workflows/reminder-tick.yml` — schedule `*/15 * * * *`, curl `/api/tick` with secret header
