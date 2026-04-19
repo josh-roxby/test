@@ -176,12 +176,12 @@ state.countdowns = [
 - [x] 20e. `urlBase64ToUint8Array()` util
 
 ## Block 21 — Settings UI: Daily reminders
-- [ ] 21a. Extend settings schema + back-compat
-- [ ] 21b. Settings section: toggle, time picker, timezone, device status
-- [ ] 21c. Enable flow (permission → subscribe → POST)
-- [ ] 21d. Disable flow (unsubscribe → POST)
-- [ ] 21e. States: denied / unsupported / pending / connected
-- [ ] 21f. Test notification panel: "Send now" + delay picker (5s / 30s / 1m / 5m / 15m)
+- [x] 21a. Extend settings schema + back-compat
+- [x] 21b. Settings section: toggle, time picker, timezone, device status
+- [x] 21c. Enable flow (permission → subscribe → POST)
+- [x] 21d. Disable flow (unsubscribe → POST)
+- [x] 21e. States: denied / unsupported / pending / connected
+- [x] 21f. Test notification panel: "Send now" + delay picker (5s / 30s / 1m / 5m / 15m)
 
 ## Block 22 — Cron + E2E
 - [ ] 22a. `.github/workflows/reminder-tick.yml` — `*/15 * * * *`
