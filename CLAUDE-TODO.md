@@ -227,12 +227,12 @@ state.countdowns = [
 - [x] 14h. Tighten check-in status card
 
 ## Block 15 — "At a glance" (Wrapped-style) modal
-- [ ] 15a. Aggregators (peak mood day, hardest day, best sleep, top habit, longest streak, diary moment)
-- [ ] 15b. Modal shell + stage nav
-- [ ] 15c. Stage renderers
-- [ ] 15d. Week / Month toggle
-- [ ] 15e. Access button on Reports header
-- [ ] 15f. Animation polish
+- [x] 15a. Aggregators (peak mood day, hardest day, best sleep, top habit, longest streak, diary moment)
+- [x] 15b. Modal shell + stage nav
+- [x] 15c. Stage renderers
+- [x] 15d. Week / Month toggle
+- [x] 15e. Access button on Reports header
+- [x] 15f. Animation polish
 
 ## Block 16 — In-app reminder nudge (fallback for no-push users)
 - [ ] 16a. Sticky banner on Today past `settings.reminder.time` when check-in incomplete (only if push is NOT active)

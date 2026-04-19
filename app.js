@@ -1661,6 +1661,268 @@ function deleteCountdownConfirm(id) {
   toast('Deleted');
 }
 
+// ---- "At a glance" Wrapped-style modal --------------------------------------
+
+let wrappedOpen = false;
+let wrappedRange = 'week';
+let wrappedStage = 0;
+
+function openWrapped(range = 'week') {
+  wrappedOpen = true;
+  wrappedRange = range;
+  wrappedStage = 0;
+  renderWrapped();
+}
+
+function closeWrapped() {
+  wrappedOpen = false;
+  const scrim = qs('.wrapped-scrim');
+  if (scrim) scrim.remove();
+}
+
+function wrappedNext() {
+  const stages = buildWrappedStages(wrappedAggregate(wrappedRange));
+  if (wrappedStage >= stages.length - 1) { closeWrapped(); return; }
+  wrappedStage++;
+  renderWrapped();
+}
+
+function wrappedPrev() {
+  if (wrappedStage <= 0) return;
+  wrappedStage--;
+  renderWrapped();
+}
+
+function wrappedAggregate(range) {
+  const days = rangeDayKeys(range);
+  let peakMood = null, peakMoodDay = null;
+  let moodSum = 0, moodCount = 0;
+  let bestSleepQ = null, bestSleepDay = null;
+  let sleepQSum = 0, sleepQCount = 0;
+  let sleepHSum = 0, sleepHCount = 0;
+  let loggedDays = 0;
+
+  for (const day of days) {
+    const log = state.logs[day];
+    if (!log) continue;
+    if (log.mood != null || log.sleep?.quality != null || (log.habits && Object.keys(log.habits).length)) {
+      loggedDays++;
+    }
+    if (log.mood != null) {
+      moodSum += log.mood; moodCount++;
+      if (peakMood === null || log.mood > peakMood) { peakMood = log.mood; peakMoodDay = day; }
+    }
+    if (log.sleep?.quality != null) {
+      sleepQSum += log.sleep.quality; sleepQCount++;
+      if (bestSleepQ === null || log.sleep.quality > bestSleepQ) {
+        bestSleepQ = log.sleep.quality;
+        bestSleepDay = day;
+      }
+    }
+    if (log.sleep?.hours != null) { sleepHSum += log.sleep.hours; sleepHCount++; }
+  }
+
+  const active = state.habits.filter((x) => !x.archivedAt);
+  let topHabit = null, topHabitDone = 0;
+  for (const ht of active) {
+    const done = days.filter((d) => isHabitDoneForDay(ht, d)).length;
+    if (done > topHabitDone) { topHabitDone = done; topHabit = ht; }
+  }
+
+  let longest = 0, longestHabit = null;
+  for (const ht of active) {
+    const s = longestStreak(ht);
+    if (s > longest) { longest = s; longestHabit = ht; }
+  }
+
+  const diaryEntries = days
+    .map((d) => ({ day: d, diary: state.logs[d]?.diary }))
+    .filter((e) => e.diary && (e.diary.good || e.diary.challenge));
+
+  return {
+    range,
+    totalDays: days.length,
+    loggedDays,
+    moodAvg: moodCount ? moodSum / moodCount : null,
+    peakMood, peakMoodDay,
+    sleepQualAvg: sleepQCount ? sleepQSum / sleepQCount : null,
+    bestSleepQ, bestSleepDay,
+    sleepHoursAvg: sleepHCount ? sleepHSum / sleepHCount : null,
+    topHabit, topHabitDone,
+    longestStreakInRange: longest, longestStreakHabit: longestHabit,
+    diaryCount: diaryEntries.length,
+    diaryMoment: diaryEntries[diaryEntries.length - 1] || null,
+  };
+}
+
+function formatWrappedDate(dayKey) {
+  return parseDayKey(dayKey).toLocaleDateString(undefined, {
+    weekday: 'short', month: 'short', day: 'numeric',
+  });
+}
+
+// Produces an ordered list of stages to show, skipping ones with no data.
+function buildWrappedStages(stats) {
+  const rangeLabel = stats.range === 'month' ? 'month' : 'week';
+  const stages = [];
+
+  stages.push({
+    kind: 'intro',
+    title: `Your ${rangeLabel} at a glance`,
+    emoji: '✨',
+    sub: `${stats.loggedDays} of ${stats.totalDays} day${stats.totalDays === 1 ? '' : 's'} logged`,
+  });
+
+  if (stats.peakMood != null) {
+    const face = MOOD_OPTIONS.find((m) => m.value === stats.peakMood);
+    stages.push({
+      kind: 'mood',
+      title: 'Your mood peak',
+      emoji: face?.emoji || '🙂',
+      big: face?.caption || '',
+      sub: stats.peakMoodDay ? `on ${formatWrappedDate(stats.peakMoodDay)}` : '',
+      footer: stats.moodAvg != null ? `Average: ${stats.moodAvg.toFixed(1)} / 5` : null,
+    });
+  }
+
+  if (stats.bestSleepQ != null) {
+    const face = SLEEP_FACES.find((s) => s.value === stats.bestSleepQ);
+    const hoursLine = stats.sleepHoursAvg != null
+      ? `Averaged ${stats.sleepHoursAvg.toFixed(1)}h a night`
+      : (stats.sleepQualAvg != null ? `Quality ${stats.sleepQualAvg.toFixed(1)} / 5` : null);
+    stages.push({
+      kind: 'sleep',
+      title: 'Your best sleep',
+      emoji: face?.emoji || '😴',
+      big: face?.caption || '',
+      sub: stats.bestSleepDay ? `on ${formatWrappedDate(stats.bestSleepDay)}` : '',
+      footer: hoursLine,
+    });
+  }
+
+  if (stats.topHabit) {
+    stages.push({
+      kind: 'habit',
+      title: 'Your top habit',
+      emoji: stats.topHabit.kind === 'good' ? '🌳' : '🛑',
+      big: stats.topHabit.title,
+      sub: `${stats.topHabitDone} of ${stats.totalDays} days`,
+      color: stats.topHabit.color,
+    });
+  }
+
+  if (stats.longestStreakInRange > 0 && stats.longestStreakHabit) {
+    stages.push({
+      kind: 'streak',
+      title: 'Your longest streak',
+      emoji: '🔥',
+      big: `${stats.longestStreakInRange} day${stats.longestStreakInRange === 1 ? '' : 's'}`,
+      sub: stats.longestStreakHabit.title,
+      color: stats.longestStreakHabit.color,
+    });
+  }
+
+  if (stats.diaryMoment) {
+    const diary = stats.diaryMoment.diary;
+    const text = (diary.good || diary.challenge).slice(0, 140);
+    stages.push({
+      kind: 'diary',
+      title: 'A moment from your diary',
+      emoji: '📖',
+      big: `"${text}"`,
+      sub: formatWrappedDate(stats.diaryMoment.day),
+    });
+  }
+
+  stages.push({
+    kind: 'outro',
+    title: 'Keep going',
+    emoji: '🌱',
+    sub: 'See you tomorrow.',
+  });
+
+  return stages;
+}
+
+function renderWrapped() {
+  const existing = qs('.wrapped-scrim');
+  if (existing) existing.remove();
+  if (!wrappedOpen) return;
+
+  const stats = wrappedAggregate(wrappedRange);
+  const stages = buildWrappedStages(stats);
+  if (wrappedStage >= stages.length) wrappedStage = stages.length - 1;
+  const stage = stages[wrappedStage];
+
+  const scrim = h('div', {
+    class: 'scrim wrapped-scrim',
+    onClick: (e) => {
+      if (e.target.classList.contains('wrapped-scrim')) closeWrapped();
+    },
+  });
+
+  const sheet = h('div', { class: 'sheet wrapped-sheet' });
+
+  // Header: close + range toggle + progress dots
+  const header = h('header', null,
+    h('button', {
+      class: 'ghost',
+      style: { padding: '6px 10px', minHeight: '36px' },
+      onClick: closeWrapped,
+      'aria-label': 'Close',
+    }, '✕'),
+    h('div', { class: 'segmented', style: { gridAutoColumns: 'minmax(60px, 1fr)' } },
+      h('button', {
+        class: wrappedRange === 'week' ? 'on' : '',
+        onClick: () => { wrappedRange = 'week'; wrappedStage = 0; renderWrapped(); },
+        type: 'button',
+      }, 'Week'),
+      h('button', {
+        class: wrappedRange === 'month' ? 'on' : '',
+        onClick: () => { wrappedRange = 'month'; wrappedStage = 0; renderWrapped(); },
+        type: 'button',
+      }, 'Month'),
+    ),
+    h('div', { class: 'wrapped-dots', 'aria-label': 'Progress' },
+      ...stages.map((_, i) =>
+        h('span', { class: 'wrapped-dot' + (i === wrappedStage ? ' active' : '') }),
+      ),
+    ),
+  );
+  sheet.appendChild(header);
+
+  // Body: current stage, full-bleed
+  const body = h('div', {
+    class: 'wrapped-body',
+    style: stage.color ? { background: `linear-gradient(180deg, ${stage.color}22 0%, transparent 70%)` } : undefined,
+    onClick: wrappedNext,
+  });
+  body.appendChild(h('div', { class: 'wrapped-stage' },
+    h('div', { class: 'wrapped-emoji' }, stage.emoji),
+    h('h2', { class: 'wrapped-title' }, stage.title),
+    stage.big ? h('div', { class: 'wrapped-big' }, stage.big) : null,
+    stage.sub ? h('div', { class: 'wrapped-sub' }, stage.sub) : null,
+    stage.footer ? h('div', { class: 'wrapped-footer' }, stage.footer) : null,
+  ));
+  sheet.appendChild(body);
+
+  // Footer: nav buttons
+  const footer = h('footer');
+  if (wrappedStage > 0) {
+    footer.appendChild(h('button', { class: 'ghost', onClick: wrappedPrev }, 'Back'));
+  }
+  footer.appendChild(h('span', { class: 'grow' }));
+  const isLast = wrappedStage === stages.length - 1;
+  footer.appendChild(h('button', {
+    class: 'primary',
+    onClick: wrappedNext,
+  }, isLast ? 'Done' : 'Next'));
+  sheet.appendChild(footer);
+
+  scrim.appendChild(sheet);
+  document.body.appendChild(scrim);
+}
+
 // ---- Reports tab ------------------------------------------------------------
 
 let reportsSubTab = 'overview';   // 'overview' | 'mood' | 'sleep' | 'habits'
@@ -1815,7 +2077,14 @@ function legendItem(color, label) {
 
 function renderReports() {
   const view = h('div', { class: 'view' });
-  view.appendChild(h('h1', { style: { marginBottom: '8px' } }, 'Reports'));
+  view.appendChild(h('div', { class: 'row between', style: { marginBottom: '8px', alignItems: 'center' } },
+    h('h1', { style: { margin: 0 } }, 'Reports'),
+    h('button', {
+      class: 'ghost small',
+      style: { minHeight: '36px', padding: '6px 12px' },
+      onClick: () => openWrapped(reportsRange),
+    }, '✨ At a glance'),
+  ));
 
   const noLogs = Object.keys(state.logs).length === 0;
   const noHabits = state.habits.length === 0;

@@ -474,6 +474,97 @@ label { display: block; font-size: 0.85rem; color: var(--muted); margin: 12px 0 
 }
 .theme-swatch.selected { border-color: var(--text); }
 
+/* "At a glance" Wrapped-style modal */
+.wrapped-sheet {
+  height: min(620px, calc(100dvh - 24px - var(--safe-top) - var(--safe-bot)));
+  max-height: none;
+}
+.wrapped-sheet header {
+  padding: 10px 10px 10px 8px;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.wrapped-sheet .segmented {
+  max-width: 180px;
+  flex: 0 0 auto;
+}
+.wrapped-dots {
+  display: flex;
+  gap: 3px;
+  margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 100%;
+}
+.wrapped-dot {
+  width: 10px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+}
+.wrapped-dot.active {
+  background: var(--accent);
+}
+.wrapped-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 18px;
+  cursor: pointer;
+  overflow: hidden;
+}
+.wrapped-stage {
+  text-align: center;
+  max-width: 400px;
+  animation: wrapped-in 0.35s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+@keyframes wrapped-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+.wrapped-emoji {
+  font-size: 4.4rem;
+  line-height: 1;
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.25));
+  margin-bottom: 4px;
+}
+.wrapped-title {
+  font-size: 0.9rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0;
+  font-weight: 600;
+}
+.wrapped-big {
+  font-size: clamp(1.4rem, 5vw, 2rem);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  line-height: 1.15;
+  margin: 4px 0;
+  word-break: break-word;
+}
+.wrapped-sub {
+  font-size: 1rem;
+  color: var(--muted);
+  margin: 0;
+}
+.wrapped-footer {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  width: 100%;
+}
+
 /* Toast */
 #toast {
   position: fixed; left: 50%; bottom: calc(96px + var(--safe-bot)); transform: translateX(-50%);
