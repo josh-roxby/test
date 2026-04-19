@@ -79,6 +79,27 @@ const DIARY_CAP = 140;
 const CHECKIN_STEPS = ['sleep', 'mood', 'prompt', 'habits', 'diary'];
 // + an implicit 'summary' step after all of the above.
 
+const COUNTDOWN_AUTO_ARCHIVE_MS = 24 * 60 * 60 * 1000; // auto-archive 24h past target
+
+const COUNTDOWN_THEMES = [
+  { id: 'sunset',    label: 'Sunset'    },
+  { id: 'ocean',     label: 'Ocean'     },
+  { id: 'forest',    label: 'Forest'    },
+  { id: 'aurora',    label: 'Aurora'    },
+  { id: 'peach',     label: 'Peach'     },
+  { id: 'lavender',  label: 'Lavender'  },
+  { id: 'neon',      label: 'Neon'      },
+  { id: 'mono',      label: 'Mono'      },
+  { id: 'candy',     label: 'Candy'     },
+  { id: 'confetti',  label: 'Confetti'  },
+  { id: 'snowfall',  label: 'Snowfall'  },
+  { id: 'tropical',  label: 'Tropical'  },
+  { id: 'midnight',  label: 'Midnight'  },
+  { id: 'rose',      label: 'Rose gold' },
+  { id: 'sage',      label: 'Sage'      },
+  { id: 'polka',     label: 'Polka'     },
+];
+
 const FACTS = [
   'Honey never spoils — archaeologists have found edible pots 3,000 years old.',
   'A day on Venus is longer than its year.',
@@ -231,6 +252,106 @@ function nextIncompleteStep() {
     if (!log.steps?.[CHECKIN_STEPS[i]]) return i;
   }
   return null;
+}
+
+// ---- Countdown helpers ------------------------------------------------------
+
+function countdownUid() {
+  return 'c_' + Math.random().toString(36).slice(2, 10);
+}
+
+function countdownTargetDate(c) {
+  return new Date(c.target);
+}
+
+function countdownMillisRemaining(c, now = new Date()) {
+  return countdownTargetDate(c).getTime() - now.getTime();
+}
+
+// "upcoming" | "happened" (target passed but < 24h ago) | "past" | "archived"
+function countdownStatus(c, now = new Date()) {
+  if (c.archivedAt) return 'archived';
+  const delta = countdownMillisRemaining(c, now);
+  if (delta > 0) return 'upcoming';
+  if (delta > -COUNTDOWN_AUTO_ARCHIVE_MS) return 'happened';
+  return 'past';
+}
+
+// For annual recurring countdowns whose target has passed, bump target forward
+// by whole years until it's in the future. Called once per render.
+function bumpAnnualCountdowns(now = new Date()) {
+  let changed = false;
+  for (const c of state.countdowns) {
+    if (c.archivedAt) continue;
+    if (c.recurring !== 'annual') continue;
+    const target = countdownTargetDate(c);
+    if (target.getTime() > now.getTime()) continue;
+    const bumped = new Date(target);
+    while (bumped.getTime() <= now.getTime()) {
+      bumped.setFullYear(bumped.getFullYear() + 1);
+    }
+    c.target = bumped.toISOString();
+    changed = true;
+  }
+  if (changed) save();
+}
+
+// Auto-archive non-recurring countdowns whose target passed more than 24h ago.
+function autoArchiveCountdowns(now = new Date()) {
+  let changed = false;
+  for (const c of state.countdowns) {
+    if (c.archivedAt) continue;
+    if (c.recurring === 'annual') continue;
+    const target = countdownTargetDate(c);
+    if (now.getTime() - target.getTime() > COUNTDOWN_AUTO_ARCHIVE_MS) {
+      c.archivedAt = now.toISOString();
+      changed = true;
+    }
+  }
+  if (changed) save();
+}
+
+// Runs on each render that touches countdowns.
+function reconcileCountdowns(now = new Date()) {
+  bumpAnnualCountdowns(now);
+  autoArchiveCountdowns(now);
+}
+
+function sortedUpcomingCountdowns() {
+  return state.countdowns
+    .filter((c) => !c.archivedAt)
+    .slice()
+    .sort((a, b) => countdownTargetDate(a).getTime() - countdownTargetDate(b).getTime());
+}
+
+function sortedArchivedCountdowns() {
+  return state.countdowns
+    .filter((c) => c.archivedAt)
+    .slice()
+    .sort((a, b) => new Date(b.archivedAt).getTime() - new Date(a.archivedAt).getTime());
+}
+
+function formatCountdownRemaining(c, now = new Date()) {
+  const status = countdownStatus(c, now);
+  if (status === 'archived') return 'archived';
+  if (status === 'happened') return '🎉 happened';
+  if (status === 'past') return 'past';
+  const delta = countdownMillisRemaining(c, now);
+  const days = Math.floor(delta / (24 * 3600 * 1000));
+  const hours = Math.floor((delta % (24 * 3600 * 1000)) / (3600 * 1000));
+  const mins = Math.floor((delta % (3600 * 1000)) / (60 * 1000));
+  if (days >= 7) return `${days} days`;
+  if (days >= 1) return `${days}d ${hours}h`;
+  if (hours >= 1) return `${hours}h ${mins}m`;
+  if (mins >= 1)  return `${mins}m`;
+  return '< 1m';
+}
+
+function formatCountdownTargetLabel(c) {
+  const d = countdownTargetDate(c);
+  return d.toLocaleDateString(undefined, {
+    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
+  }) + ' · ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 }
 
 function todayStateText(habit) {

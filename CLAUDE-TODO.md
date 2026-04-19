@@ -117,9 +117,9 @@ state.countdowns = [
 - [x] 8c. Empty state copy + CTA to start a check-in
 
 ## Block 9 — Countdowns data + themes
-- [ ] 9a. Countdown helpers (uid, sort by target, expiry check, annual-bump)
-- [ ] 9b. ~16 CSS gradient/pattern theme presets (sunset, ocean, confetti, snowfall, neon, mono, nature, polka…)
-- [ ] 9c. Time-remaining formatter (`7d 3h`, `today`, `🎉 happened`, `archived`)
+- [x] 9a. Countdown helpers (uid, sort by target, expiry check, annual-bump)
+- [x] 9b. ~16 CSS gradient/pattern theme presets (sunset, ocean, confetti, snowfall, neon, mono, nature, polka…)
+- [x] 9c. Time-remaining formatter (`7d 3h`, `today`, `🎉 happened`, `archived`)
 
 ## Block 10 — Countdowns tab
 - [ ] 10a. Countdowns list view: upcoming sorted soonest-first, archived collapsed below
