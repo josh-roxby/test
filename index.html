@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f1115" />
+    <title>Tempo — habits & mood</title>
+    <link rel="manifest" href="./manifest.json" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./icon.svg" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main id="app" aria-live="polite"></main>
+
+    <nav id="tabbar" hidden>
+      <button data-route="home" class="tab" aria-label="Home">
+        <span class="tab-icon">◐</span><span class="tab-label">Today</span>
+      </button>
+      <button data-route="manage" class="tab" aria-label="Manage habits">
+        <span class="tab-icon">＋</span><span class="tab-label">Habits</span>
+      </button>
+      <button data-route="settings" class="tab" aria-label="Settings">
+        <span class="tab-icon">⚙</span><span class="tab-label">Settings</span>
+      </button>
+    </nav>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
