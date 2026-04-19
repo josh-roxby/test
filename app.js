@@ -519,7 +519,10 @@ function wireTabbar() {
 function updateGear() {
   const gear = qs('#gear');
   if (!gear) return;
-  gear.classList.toggle('active', route === 'settings');
+  const onSettings = route === 'settings';
+  gear.classList.toggle('active', onSettings);
+  if (onSettings) gear.setAttribute('aria-current', 'page');
+  else gear.removeAttribute('aria-current');
 }
 
 function wireGear() {
@@ -1536,6 +1539,20 @@ function renderReports() {
   const view = h('div', { class: 'view' });
   view.appendChild(h('h1', { style: { marginBottom: '8px' } }, 'Reports'));
 
+  const noLogs = Object.keys(state.logs).length === 0;
+  const noHabits = state.habits.length === 0;
+  if (noLogs && noHabits) {
+    view.appendChild(h('div', { class: 'summary' },
+      h('h2', { style: { color: 'var(--text)', fontSize: '1.15rem', margin: '0 0 6px' } },
+        'Nothing to chart yet'),
+      h('p', { style: { margin: '0 0 14px' } },
+        'Check in for a few days — mood, sleep, and habit trends will appear here as lines and heatmaps.'),
+      h('button', { class: 'primary block', onClick: () => go('home') },
+        'Go to today'),
+    ));
+    return view;
+  }
+
   const tabs = h('div', { class: 'segmented', style: { marginBottom: '10px' } });
   for (const { id, label } of [
     { id: 'overview', label: 'Overview' },
@@ -2096,9 +2113,11 @@ function renderDiaryField(diary, key, label, placeholder) {
   }, `${ta.value.length}/${DIARY_CAP}`);
   ta.addEventListener('input', () => {
     diary[key] = ta.value;
-    counter.textContent = `${ta.value.length}/${DIARY_CAP}`;
-    counter.style.color = ta.value.length >= DIARY_CAP
-      ? 'var(--bad)' : 'var(--muted)';
+    const len = ta.value.length;
+    counter.textContent = `${len}/${DIARY_CAP}`;
+    counter.style.color = len >= DIARY_CAP
+      ? 'var(--bad)'
+      : (len >= DIARY_CAP - 20 ? '#fbbf24' : 'var(--muted)');
     save();
   });
   wrap.appendChild(ta);

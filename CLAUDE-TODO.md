@@ -138,8 +138,8 @@ state.countdowns = [
 - [x] 11g. Habits sub-tab: per-habit view (reuse heatmap for tick, line for count/percent with target line)
 
 ## Block 12 — Polish
-- [ ] 12a. Gear icon a11y + focus-visible
-- [ ] 12b. Empty states for Diary, Countdowns, Reports
-- [ ] 12c. Diary char counters (e.g. `112/140`, red at >= 140)
-- [ ] 12d. Mobile: 5-tab spacing audit, label sizing
-- [ ] 12e. End-to-end smoke test + commit + deploy notes
+- [x] 12a. Gear icon a11y + focus-visible
+- [x] 12b. Empty states for Diary, Countdowns, Reports
+- [x] 12c. Diary char counters (e.g. `112/140`, red at >= 140)
+- [x] 12d. Mobile: 5-tab spacing audit, label sizing
+- [x] 12e. End-to-end smoke test + commit + deploy notes
