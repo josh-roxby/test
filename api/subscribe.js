@@ -1,6 +1,7 @@
 // POST /api/subscribe
-// Body: { subscription, reminderTime: "HH:MM", timezone: IANA }
+// Body: { subscription, bucket?, reminderTime?, timezone }
 // Stores or updates the subscription in KV, keyed by a hash of the endpoint.
+// Accepts either a time-of-day `bucket` (preferred) or legacy `reminderTime`.
 
 import {
   kv, kvGetJson, kvSetJson,
@@ -11,6 +12,7 @@ import {
   isValidTimezone,
   clientIp,
   rateLimit,
+  REMINDER_BUCKETS,
 } from './_lib.js';
 
 export default async function handler(req, res) {
@@ -30,15 +32,21 @@ export default async function handler(req, res) {
   const body = readBody(req);
   if (!body) return res.status(400).json({ error: 'invalid JSON body' });
 
-  const { subscription, reminderTime, timezone } = body;
+  const { subscription, bucket, reminderTime, timezone } = body;
   if (!isValidSubscription(subscription)) {
     return res.status(400).json({ error: 'invalid subscription' });
   }
-  if (!isValidTimeString(reminderTime)) {
-    return res.status(400).json({ error: 'invalid reminderTime (expected HH:MM)' });
-  }
   if (!isValidTimezone(timezone)) {
     return res.status(400).json({ error: 'invalid timezone (expected IANA)' });
+  }
+  if (!bucket && !reminderTime) {
+    return res.status(400).json({ error: 'missing bucket or reminderTime' });
+  }
+  if (bucket && !REMINDER_BUCKETS[bucket]) {
+    return res.status(400).json({ error: 'invalid bucket' });
+  }
+  if (reminderTime && !isValidTimeString(reminderTime)) {
+    return res.status(400).json({ error: 'invalid reminderTime (expected HH:MM)' });
   }
 
   const key = `sub:${endpointHash(subscription.endpoint)}`;
@@ -46,7 +54,8 @@ export default async function handler(req, res) {
   const record = {
     endpoint: subscription.endpoint,
     keys: subscription.keys,
-    reminderTime,
+    bucket: bucket || existing?.bucket || null,
+    reminderTime: reminderTime || existing?.reminderTime || null,
     timezone,
     lastSentDay: existing?.lastSentDay ?? null,
     createdAt: existing?.createdAt ?? new Date().toISOString(),

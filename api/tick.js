@@ -5,7 +5,12 @@
 // one today (per their local timezone).
 
 import webpush from 'web-push';
-import { kv, kvGetJson, kvSetJson, nowInTimezone, withinMinutes, vapidSubject } from './_lib.js';
+import {
+  kv, kvGetJson, kvSetJson,
+  nowInTimezone, withinMinutes,
+  reminderBucketDue,
+  vapidSubject,
+} from './_lib.js';
 
 const WINDOW_MINUTES = 7;
 
@@ -45,7 +50,16 @@ export default async function handler(req, res) {
     }
 
     if (sub.lastSentDay === local.ymd) { result.skipped++; continue; }
-    if (!withinMinutes(local.hm, sub.reminderTime, WINDOW_MINUTES)) { result.skipped++; continue; }
+
+    // Prefer bucket logic when set (sub was created in the new UI); fall back
+    // to the legacy ±7-min window for pre-bucket subscriptions.
+    let due = false;
+    if (sub.bucket) {
+      due = reminderBucketDue(sub, local);
+    } else if (sub.reminderTime) {
+      due = withinMinutes(local.hm, sub.reminderTime, WINDOW_MINUTES);
+    }
+    if (!due) { result.skipped++; continue; }
 
     const payload = JSON.stringify({
       title: 'Tempo check-in',

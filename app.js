@@ -12,13 +12,15 @@ const DEFAULT_STATE = {
   countdowns: [],
   settings: {
     rolloverHour: 3,
-    lastExportAt: null, // ISO timestamp of most recent JSON export
+    theme: 'system',         // 'system' | 'dark' | 'light'
+    lastExportAt: null,      // ISO timestamp of most recent JSON export
     reminder: {
       enabled: false,
-      time: '09:00',
-      timezone: null,   // filled in when the user subscribes
-      endpoint: null,   // last successful push subscription endpoint
-      dismissedDate: null, // YYYY-MM-DD — day the user dismissed the in-app nudge
+      bucket: 'evening',     // time-of-day bucket (see REMINDER_BUCKETS)
+      time: null,            // legacy HH:MM — still supported on the server
+      timezone: null,        // filled in when the user subscribes
+      endpoint: null,        // last successful push subscription endpoint
+      dismissedDate: null,   // YYYY-MM-DD — day the user dismissed the in-app nudge
     },
   },
 };
@@ -91,6 +93,27 @@ const SLEEP_FACES = [
 ];
 
 const DIARY_CAP = 140;
+
+// Time-of-day buckets for daily reminders. The server picks a deterministic
+// random minute within the range per user per day, so the reminder feels
+// spontaneous but stable within the chosen window.
+const REMINDER_BUCKETS = {
+  morning:   { label: 'Morning',   hint: '7 – 10 AM',     startHour: 7,  endHour: 10 },
+  noon:      { label: 'Noon',      hint: '10 AM – 12 PM', startHour: 10, endHour: 12 },
+  afternoon: { label: 'Afternoon', hint: '12 – 4 PM',     startHour: 12, endHour: 16 },
+  evening:   { label: 'Evening',   hint: '4 – 7 PM',      startHour: 16, endHour: 19 },
+  night:     { label: 'Night',     hint: '7 – 10 PM',     startHour: 19, endHour: 22 },
+};
+
+function inferBucketFromTime(hhmm) {
+  if (!hhmm) return 'evening';
+  const [h] = hhmm.split(':').map(Number);
+  if (h < 10) return 'morning';
+  if (h < 12) return 'noon';
+  if (h < 16) return 'afternoon';
+  if (h < 19) return 'evening';
+  return 'night';
+}
 
 const CHECKIN_STEPS = ['sleep', 'mood', 'prompt', 'habits', 'diary'];
 // + an implicit 'summary' step after all of the above.
@@ -599,10 +622,17 @@ function wireGear() {
 // ---- Reminder nudge (in-app fallback when push isn't active) ----------------
 
 function reminderTimePassed() {
+  const now = new Date();
+  const nowMins = now.getHours() * 60 + now.getMinutes();
+  const bucket = REMINDER_BUCKETS[state.settings.reminder?.bucket];
+  if (bucket) {
+    // Past the start of the chosen bucket window.
+    return nowMins >= bucket.startHour * 60;
+  }
+  // Legacy HH:MM fallback for pre-bucket saves.
   const t = state.settings.reminder?.time || '18:00';
   const [th, tm] = t.split(':').map(Number);
-  const now = new Date();
-  return now.getHours() * 60 + now.getMinutes() >= th * 60 + tm;
+  return nowMins >= th * 60 + tm;
 }
 
 function pushReminderActive() {
@@ -2548,30 +2578,43 @@ function renderRemindersSection() {
 
   if (!r.enabled) return wrap;
 
-  // Time + timezone
-  wrap.appendChild(h('label', 'Time'));
-  const timeIn = h('input', { type: 'time', style: { maxWidth: '160px' } });
-  timeIn.value = r.time;
-  timeIn.addEventListener('change', async () => {
-    const next = timeIn.value;
-    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(next)) {
-      toast('Invalid time');
-      timeIn.value = r.time;
-      return;
-    }
-    state.settings.reminder.time = next;
+  // Migrate legacy saves: if a time exists but no bucket, infer a bucket.
+  if (!r.bucket) {
+    r.bucket = inferBucketFromTime(r.time);
     save();
-    // If currently subscribed, re-sync server with new time.
-    if (r.endpoint) {
-      try {
-        await subscribeToPush(next, r.timezone || detectTimezone());
-        toast(`Reminder set to ${next}`);
-      } catch (err) {
-        toast(`Couldn't sync time: ${err.message}`);
-      }
-    }
+  }
+
+  // Bucket picker (card list — easier to read than a 5-way segmented on mobile).
+  wrap.appendChild(h('label', 'When?'));
+  wrap.appendChild(h('p', { class: 'small muted', style: { margin: '0 0 8px' } },
+    'Pick a window. Tempo picks a random minute inside it each day — so the nudge feels fresh, not clockwork.'));
+
+  const list = h('div', { class: 'bucket-list' });
+  Object.entries(REMINDER_BUCKETS).forEach(([id, meta]) => {
+    const btn = h('button', {
+      type: 'button',
+      class: 'bucket-option' + (r.bucket === id ? ' selected' : ''),
+      onClick: async () => {
+        if (r.bucket === id) return;
+        r.bucket = id;
+        save();
+        render();
+        if (r.endpoint) {
+          try {
+            await subscribeToPush(id, r.timezone || detectTimezone());
+            toast(`Reminder set to ${meta.label.toLowerCase()}`);
+          } catch (err) {
+            toast(`Couldn't sync: ${err.message}`);
+          }
+        }
+      },
+    },
+      h('span', null, meta.label),
+      h('span', { class: 'bucket-hint' }, meta.hint),
+    );
+    list.appendChild(btn);
   });
-  wrap.appendChild(timeIn);
+  wrap.appendChild(list);
 
   const tz = r.timezone || detectTimezone();
   wrap.appendChild(h('p', { class: 'small muted', style: { marginTop: '8px' } },
@@ -2598,10 +2641,12 @@ async function enableReminders() {
 
     const r = state.settings.reminder;
     const tz = r.timezone || detectTimezone();
-    const sub = await subscribeToPush(r.time, tz);
+    const bucket = r.bucket || inferBucketFromTime(r.time);
+    const sub = await subscribeToPush(bucket, tz);
     state.settings.reminder.enabled = true;
     state.settings.reminder.timezone = tz;
     state.settings.reminder.endpoint = sub.endpoint;
+    state.settings.reminder.bucket = bucket;
     save();
     toast('Reminders on');
   } catch (err) {
@@ -2727,6 +2772,9 @@ function renderSettings() {
   // --- Backup nudge (shows if data exists and no export in 30 days) ---
   const nudge = renderBackupNudge();
   if (nudge) view.appendChild(nudge);
+
+  // --- Appearance ---
+  view.appendChild(renderAppearanceSection());
 
   // --- Day rollover ---
   view.appendChild(h('h2', { style: { marginTop: '20px' } }, 'Day rollover'));
@@ -3349,9 +3397,12 @@ function detectTimezone() {
   }
 }
 
-async function subscribeToPush(reminderTime, timezone) {
+async function subscribeToPush(bucket, timezone) {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
     throw new Error('Push not supported on this browser');
+  }
+  if (!REMINDER_BUCKETS[bucket]) {
+    throw new Error('Invalid reminder bucket');
   }
   const reg = await navigator.serviceWorker.ready;
   const publicKey = await fetchVapidPublicKey();
@@ -3369,7 +3420,7 @@ async function subscribeToPush(reminderTime, timezone) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       subscription: subscription.toJSON(),
-      reminderTime,
+      bucket,
       timezone,
     }),
   });
@@ -3471,7 +3522,69 @@ function showUpdateToast(reg) {
 
 // ---- Init -------------------------------------------------------------------
 
+function renderAppearanceSection() {
+  const wrap = h('div');
+  wrap.appendChild(h('h2', { style: { marginTop: '20px' } }, 'Appearance'));
+  wrap.appendChild(h('p', { class: 'small muted' },
+    'Choose the theme. System follows your device preference and updates live.'));
+
+  const options = [
+    { id: 'system', label: 'System' },
+    { id: 'dark',   label: 'Dark'   },
+    { id: 'light',  label: 'Light'  },
+  ];
+  const seg = h('div', { class: 'segmented', style: { marginTop: '10px' } });
+  options.forEach((opt) => {
+    seg.appendChild(h('button', {
+      class: state.settings.theme === opt.id ? 'on' : '',
+      type: 'button',
+      onClick: () => {
+        state.settings.theme = opt.id;
+        save();
+        applyTheme();
+        render();
+      },
+    }, opt.label));
+  });
+  wrap.appendChild(seg);
+  return wrap;
+}
+
+// ---- Theme (system / dark / light) ------------------------------------------
+
+function resolvedTheme(pref) {
+  if (pref === 'dark' || pref === 'light') return pref;
+  // 'system' (or anything else): follow OS preference.
+  if (typeof window !== 'undefined' && window.matchMedia) {
+    return window.matchMedia('(prefers-color-scheme: light)').matches
+      ? 'light' : 'dark';
+  }
+  return 'dark';
+}
+
+function applyTheme() {
+  const pref = state.settings.theme || 'system';
+  const resolved = resolvedTheme(pref);
+  document.documentElement.dataset.theme = resolved;
+  // Keep the mobile browser chrome in sync.
+  const meta = qs('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', resolved === 'light' ? '#f7f8fb' : '#0f1115');
+}
+
+function wireThemeMediaListener() {
+  if (!window.matchMedia) return;
+  const mq = window.matchMedia('(prefers-color-scheme: light)');
+  const handler = () => {
+    if ((state.settings.theme || 'system') === 'system') applyTheme();
+  };
+  // addEventListener is the modern path; older Safari uses addListener.
+  if (mq.addEventListener) mq.addEventListener('change', handler);
+  else if (mq.addListener) mq.addListener(handler);
+}
+
 function init() {
+  applyTheme();
+  wireThemeMediaListener();
   wireTabbar();
   wireGear();
   reconcileCountdowns();
