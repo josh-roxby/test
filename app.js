@@ -12,6 +12,12 @@ const DEFAULT_STATE = {
   countdowns: [],
   settings: {
     rolloverHour: 3,
+    reminder: {
+      enabled: false,
+      time: '09:00',
+      timezone: null,   // filled in when the user subscribes
+      endpoint: null,   // last successful push subscription endpoint
+    },
   },
 };
 
@@ -24,10 +30,18 @@ function load() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return defaultState();
     const parsed = JSON.parse(raw);
+    const defaults = defaultState();
     return {
-      ...defaultState(),
+      ...defaults,
       ...parsed,
-      settings: { ...defaultState().settings, ...(parsed.settings || {}) },
+      settings: {
+        ...defaults.settings,
+        ...(parsed.settings || {}),
+        reminder: {
+          ...defaults.settings.reminder,
+          ...(parsed.settings?.reminder || {}),
+        },
+      },
     };
   } catch {
     return defaultState();
@@ -1777,6 +1791,236 @@ function renderHabitReportCard(habit) {
   return card;
 }
 
+// ---- Settings: Daily reminders section --------------------------------------
+
+let remindersBusy = false; // prevents double-tap of the toggle
+
+function reminderSupport() {
+  if (!('serviceWorker' in navigator)) return 'unsupported';
+  if (!('PushManager' in window)) return 'unsupported';
+  if (!('Notification' in window)) return 'unsupported';
+  if (Notification.permission === 'denied') return 'denied';
+  return 'ok';
+}
+
+function renderRemindersSection() {
+  const wrap = h('div');
+  wrap.appendChild(h('h2', { style: { marginTop: '28px' } }, 'Daily reminders'));
+
+  const support = reminderSupport();
+  const r = state.settings.reminder;
+
+  if (support === 'unsupported') {
+    wrap.appendChild(h('p', { class: 'small muted' },
+      'Push notifications aren\'t supported in this browser. Try Chrome on Android (installed to home screen) for the best experience.'));
+    return wrap;
+  }
+  if (support === 'denied') {
+    wrap.appendChild(h('p', { class: 'small muted' },
+      'Notifications are blocked for this site. Enable them in your browser settings, then flip this toggle back on.'));
+    return wrap;
+  }
+
+  wrap.appendChild(h('p', { class: 'small muted' },
+    'Get a push reminder at your chosen time each day. Requires this PWA to be installed on your device (Android: "Add to Home screen").'));
+
+  // Toggle row
+  const toggleRow = h('div', {
+    class: 'row between',
+    style: { marginTop: '12px', alignItems: 'center' },
+  });
+  toggleRow.appendChild(h('label', { for: 'reminder-toggle', style: { margin: 0 } },
+    r.enabled ? 'Reminders on' : 'Reminders off'));
+
+  const toggle = h('input', {
+    id: 'reminder-toggle',
+    type: 'checkbox',
+    style: { width: '44px', height: '28px', minHeight: '28px' },
+  });
+  toggle.checked = r.enabled;
+  toggle.addEventListener('change', async () => {
+    if (remindersBusy) {
+      toggle.checked = r.enabled;
+      return;
+    }
+    if (toggle.checked) await enableReminders();
+    else await disableReminders();
+  });
+  toggleRow.appendChild(toggle);
+  wrap.appendChild(toggleRow);
+
+  if (!r.enabled) return wrap;
+
+  // Time + timezone
+  wrap.appendChild(h('label', 'Time'));
+  const timeIn = h('input', { type: 'time', style: { maxWidth: '160px' } });
+  timeIn.value = r.time;
+  timeIn.addEventListener('change', async () => {
+    const next = timeIn.value;
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(next)) {
+      toast('Invalid time');
+      timeIn.value = r.time;
+      return;
+    }
+    state.settings.reminder.time = next;
+    save();
+    // If currently subscribed, re-sync server with new time.
+    if (r.endpoint) {
+      try {
+        await subscribeToPush(next, r.timezone || detectTimezone());
+        toast(`Reminder set to ${next}`);
+      } catch (err) {
+        toast(`Couldn't sync time: ${err.message}`);
+      }
+    }
+  });
+  wrap.appendChild(timeIn);
+
+  const tz = r.timezone || detectTimezone();
+  wrap.appendChild(h('p', { class: 'small muted', style: { marginTop: '8px' } },
+    `Timezone: ${tz}`));
+
+  // Status badge
+  const statusLabel = r.endpoint ? 'Connected on this device' : 'Pending — toggle off and on to retry';
+  wrap.appendChild(h('p', { class: 'small muted', style: { marginTop: '4px' } },
+    `Status: ${statusLabel}`));
+
+  // Test notification panel
+  if (r.endpoint) wrap.appendChild(renderTestNotificationPanel());
+
+  return wrap;
+}
+
+async function enableReminders() {
+  remindersBusy = true;
+  try {
+    const perm = await requestNotificationPermission();
+    if (perm === 'unsupported') { toast('Not supported on this browser'); render(); return; }
+    if (perm === 'denied') { toast('You blocked notifications — check browser settings'); render(); return; }
+    if (perm !== 'granted') { toast('Permission not granted'); render(); return; }
+
+    const r = state.settings.reminder;
+    const tz = r.timezone || detectTimezone();
+    const sub = await subscribeToPush(r.time, tz);
+    state.settings.reminder.enabled = true;
+    state.settings.reminder.timezone = tz;
+    state.settings.reminder.endpoint = sub.endpoint;
+    save();
+    toast('Reminders on');
+  } catch (err) {
+    console.error(err);
+    toast(`Couldn't enable: ${err.message}`);
+  } finally {
+    remindersBusy = false;
+    render();
+  }
+}
+
+async function disableReminders() {
+  remindersBusy = true;
+  try {
+    await unsubscribeFromPush();
+    state.settings.reminder.enabled = false;
+    state.settings.reminder.endpoint = null;
+    save();
+    toast('Reminders off');
+  } catch (err) {
+    console.error(err);
+    toast(`Couldn't fully disable: ${err.message}`);
+  } finally {
+    remindersBusy = false;
+    render();
+  }
+}
+
+// --- Test notification panel (21f) -------------------------------------------
+
+const TEST_DELAYS = [
+  { id: 0,      label: 'Now'  },
+  { id: 5,      label: '5s'   },
+  { id: 30,     label: '30s'  },
+  { id: 60,     label: '1m'   },
+  { id: 300,    label: '5m'   },
+  { id: 900,    label: '15m'  },
+];
+let testDelaySeconds = 0;
+let testTimer = null;
+
+function renderTestNotificationPanel() {
+  const wrap = h('div', {
+    class: 'prompt-card',
+    style: { marginTop: '12px' },
+  });
+  wrap.appendChild(h('div', { class: 'kicker' }, 'Test notification'));
+  wrap.appendChild(h('p', {
+    class: 'small muted',
+    style: { margin: '6px 0 10px', lineHeight: 1.4 },
+  },
+    'Fire a test push. For delays above a few seconds, keep this tab open — the timer runs in the browser, not on the server.'));
+
+  const seg = h('div', {
+    class: 'segmented',
+    style: { flexWrap: 'wrap', gap: '2px' },
+  });
+  TEST_DELAYS.forEach((opt) => {
+    const btn = h('button', {
+      class: testDelaySeconds === opt.id ? 'on' : '',
+      type: 'button',
+      onClick: () => {
+        testDelaySeconds = opt.id;
+        qsa('.segmented button', seg).forEach((b, i) =>
+          b.classList.toggle('on', TEST_DELAYS[i].id === testDelaySeconds),
+        );
+      },
+    }, opt.label);
+    seg.appendChild(btn);
+  });
+  wrap.appendChild(seg);
+
+  const btnRow = h('div', { class: 'row', style: { marginTop: '10px', gap: '8px' } });
+  const sendBtn = h('button', { class: 'primary', type: 'button' },
+    testTimer ? 'Cancel pending test' : 'Send test');
+  sendBtn.addEventListener('click', async () => {
+    if (testTimer) {
+      clearTimeout(testTimer);
+      testTimer = null;
+      toast('Test cancelled');
+      render();
+      return;
+    }
+    if (testDelaySeconds === 0) {
+      await fireTest();
+    } else {
+      toast(`Test scheduled in ${labelForDelay(testDelaySeconds)} — keep this tab open`);
+      testTimer = setTimeout(async () => {
+        testTimer = null;
+        await fireTest();
+        render();
+      }, testDelaySeconds * 1000);
+      render();
+    }
+  });
+  btnRow.appendChild(sendBtn);
+  wrap.appendChild(btnRow);
+
+  return wrap;
+}
+
+function labelForDelay(sec) {
+  const opt = TEST_DELAYS.find((d) => d.id === sec);
+  return opt ? opt.label : `${sec}s`;
+}
+
+async function fireTest() {
+  try {
+    await sendTestPush();
+    toast('Test push sent — notification incoming');
+  } catch (err) {
+    console.error(err);
+    toast(`Test failed: ${err.message}`);
+  }
+}
+
 // ---- Settings ---------------------------------------------------------------
 
 function renderSettings() {
@@ -1812,6 +2056,9 @@ function renderSettings() {
     toast(`Rollover set to ${slider.value}:00`);
   });
   view.appendChild(slider);
+
+  // --- Daily reminders ---
+  view.appendChild(renderRemindersSection());
 
   // --- Your data ---
   view.appendChild(h('h2', { style: { marginTop: '28px' } }, 'Your data'));
@@ -2316,6 +2563,125 @@ function renderSummaryStep() {
   wrap.appendChild(h('p', { style: { marginTop: '16px' } },
     'Nice — see you tomorrow.'));
   return wrap;
+}
+
+// ---- Push notifications -----------------------------------------------------
+
+let cachedVapidPublicKey = null;
+
+async function fetchVapidPublicKey() {
+  if (cachedVapidPublicKey) return cachedVapidPublicKey;
+  const resp = await fetch('/api/vapid-public');
+  if (!resp.ok) throw new Error('Failed to fetch VAPID key');
+  const { publicKey } = await resp.json();
+  if (!publicKey) throw new Error('Server returned empty VAPID key');
+  cachedVapidPublicKey = publicKey;
+  return publicKey;
+}
+
+// Push subscriptions use a URL-safe base64 variant. Convert it to the
+// Uint8Array that PushManager.subscribe expects as applicationServerKey.
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const normalised = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(normalised);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+// Returns 'unsupported' | 'granted' | 'denied' | 'default'.
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) return 'unsupported';
+  if (Notification.permission !== 'default') return Notification.permission;
+  try {
+    return await Notification.requestPermission();
+  } catch {
+    return 'denied';
+  }
+}
+
+function detectTimezone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
+async function subscribeToPush(reminderTime, timezone) {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    throw new Error('Push not supported on this browser');
+  }
+  const reg = await navigator.serviceWorker.ready;
+  const publicKey = await fetchVapidPublicKey();
+
+  let subscription = await reg.pushManager.getSubscription();
+  if (!subscription) {
+    subscription = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey),
+    });
+  }
+
+  const resp = await fetch('/api/subscribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      subscription: subscription.toJSON(),
+      reminderTime,
+      timezone,
+    }),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.error || `Subscribe failed (${resp.status})`);
+  }
+  return subscription;
+}
+
+async function unsubscribeFromPush() {
+  if (!('serviceWorker' in navigator)) return;
+  const reg = await navigator.serviceWorker.ready;
+  const subscription = await reg.pushManager.getSubscription();
+  if (!subscription) return;
+
+  // Tell the server first so the record is cleaned up even if the browser
+  // unsubscribe fails.
+  try {
+    await fetch('/api/unsubscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint: subscription.endpoint }),
+    });
+  } catch (err) {
+    console.warn('Failed to notify server of unsubscribe:', err);
+  }
+
+  try {
+    await subscription.unsubscribe();
+  } catch (err) {
+    console.warn('Browser unsubscribe failed:', err);
+  }
+}
+
+async function sendTestPush() {
+  if (!('serviceWorker' in navigator)) {
+    throw new Error('Service worker not supported');
+  }
+  const reg = await navigator.serviceWorker.ready;
+  const subscription = await reg.pushManager.getSubscription();
+  if (!subscription) throw new Error('Not subscribed — enable reminders first');
+
+  const resp = await fetch('/api/test-send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ endpoint: subscription.endpoint }),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.error || `Test send failed (${resp.status})`);
+  }
 }
 
 // ---- Service worker ---------------------------------------------------------
