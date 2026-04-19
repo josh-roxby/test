@@ -193,11 +193,24 @@ function renderSettings() {
   );
 }
 
+// ---- Service worker ---------------------------------------------------------
+
+function registerSW() {
+  if (!('serviceWorker' in navigator)) return;
+  if (location.protocol === 'file:') return;
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./service-worker.js').catch((err) => {
+      console.warn('Service worker registration failed:', err);
+    });
+  });
+}
+
 // ---- Init -------------------------------------------------------------------
 
 function init() {
   wireTabbar();
   render();
+  registerSW();
 }
 
 init();
