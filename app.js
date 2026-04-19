@@ -785,11 +785,138 @@ function deleteHabitConfirm(id) {
   toast('Deleted');
 }
 
+// ---- Settings ---------------------------------------------------------------
+
 function renderSettings() {
-  return h('div', { class: 'view' },
-    h('h1', 'Settings'),
-    h('p', 'Settings view — coming soon. Rollover hour, export/import, about.'),
+  const view = h('div', { class: 'view' });
+  view.appendChild(h('h1', 'Settings'));
+
+  // --- Day rollover ---
+  view.appendChild(h('h2', { style: { marginTop: '20px' } }, 'Day rollover'));
+  view.appendChild(h('p', { class: 'small muted' },
+    'The hour after midnight when a new day starts. Useful for late nights — a log at 2am still counts as the previous day.'));
+
+  const hourLabel = h('span', null, `${state.settings.rolloverHour}:00`);
+  view.appendChild(h('div', {
+    class: 'row between',
+    style: { marginTop: '12px', fontSize: '1.1rem', fontVariantNumeric: 'tabular-nums' },
+  },
+    hourLabel,
+    h('span', { class: 'small muted' }, '0:00 – 6:00'),
+  ));
+
+  const slider = h('input', {
+    type: 'range', min: 0, max: 6, step: 1,
+    'aria-label': 'Rollover hour',
+    style: { width: '100%', minHeight: '32px' },
+  });
+  slider.value = state.settings.rolloverHour;
+  slider.addEventListener('input', () => {
+    hourLabel.textContent = `${slider.value}:00`;
+  });
+  slider.addEventListener('change', () => {
+    state.settings.rolloverHour = Number(slider.value);
+    save();
+    toast(`Rollover set to ${slider.value}:00`);
+  });
+  view.appendChild(slider);
+
+  // --- Your data ---
+  view.appendChild(h('h2', { style: { marginTop: '28px' } }, 'Your data'));
+  view.appendChild(h('p', { class: 'small muted' },
+    'Everything lives on this device. Export to back up or move to another device.'));
+
+  const stats = h('div', { class: 'prompt-card', style: { marginTop: '12px' } },
+    h('div', { class: 'row between' },
+      h('span', { class: 'small muted' }, 'Habits'),
+      h('span', null, String(state.habits.length)),
+    ),
+    h('div', { class: 'row between', style: { marginTop: '4px' } },
+      h('span', { class: 'small muted' }, 'Days logged'),
+      h('span', null, String(Object.keys(state.logs).length)),
+    ),
   );
+  view.appendChild(stats);
+
+  const actions = h('div', { class: 'stack', style: { marginTop: '12px' } });
+  actions.appendChild(h('button', { class: 'block', onClick: exportJSON }, 'Export to JSON'));
+
+  const fileInput = h('input', {
+    type: 'file', accept: 'application/json,.json',
+    style: { display: 'none' },
+  });
+  fileInput.addEventListener('change', (e) => {
+    handleImport(e.target.files?.[0]);
+    fileInput.value = '';
+  });
+  actions.appendChild(fileInput);
+  actions.appendChild(h('button', {
+    class: 'block',
+    onClick: () => fileInput.click(),
+  }, 'Import from JSON'));
+  view.appendChild(actions);
+
+  return view;
+}
+
+function exportJSON() {
+  try {
+    const data = JSON.stringify(state, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = h('a', {
+      href: url,
+      download: `tempo-backup-${currentDayKey()}.json`,
+      style: { display: 'none' },
+    });
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast('Exported');
+  } catch (err) {
+    console.error(err);
+    toast('Export failed');
+  }
+}
+
+function handleImport(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onerror = () => toast('Could not read file');
+  reader.onload = () => {
+    let data;
+    try {
+      data = JSON.parse(reader.result);
+    } catch {
+      toast('Not a valid JSON file');
+      return;
+    }
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      toast('Unexpected file shape');
+      return;
+    }
+    if (!Array.isArray(data.habits) || typeof data.logs !== 'object' || data.logs === null) {
+      toast('Missing habits or logs — not a Tempo backup');
+      return;
+    }
+    const habitCount = data.habits.length;
+    const dayCount = Object.keys(data.logs).length;
+    const ok = confirm(
+      `Import ${habitCount} habit${habitCount === 1 ? '' : 's'} and ${dayCount} day log${dayCount === 1 ? '' : 's'}?\n\nThis replaces your current data.`,
+    );
+    if (!ok) return;
+
+    state = {
+      ...defaultState(),
+      ...data,
+      settings: { ...defaultState().settings, ...(data.settings || {}) },
+    };
+    save();
+    render();
+    toast('Imported');
+  };
+  reader.readAsText(file);
 }
 
 // ---- Check-in flow ----------------------------------------------------------
