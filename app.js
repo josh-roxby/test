@@ -75,6 +75,68 @@ function habitMeta(habit) {
   return '';
 }
 
+// ---- Habit state / intensity / streak ---------------------------------------
+
+function habitValueForDay(habit, dayKey) {
+  const log = state.logs[dayKey];
+  if (!log || !log.habits) return undefined;
+  return log.habits[habit.id];
+}
+
+// "Success" for this day: for good habits, did they hit the target?
+// For bad habits, did they stay at/under the limit?
+function isHabitDoneForDay(habit, dayKey) {
+  const v = habitValueForDay(habit, dayKey);
+  if (v === undefined) return false;
+  if (habit.type === 'tick') {
+    return habit.kind === 'good' ? !!v : !v;
+  }
+  const n = Number(v) || 0;
+  if (habit.kind === 'good') return n >= habit.target;
+  return n <= habit.target;
+}
+
+// 0..1 "how much of the thing happened", used to shade heatmap cells.
+function habitIntensityForDay(habit, dayKey) {
+  const v = habitValueForDay(habit, dayKey);
+  if (v === undefined) return 0;
+  if (habit.type === 'tick') return v ? 1 : 0;
+  const n = Number(v) || 0;
+  if (habit.type === 'percent') return Math.max(0, Math.min(1, n / 100));
+  const target = habit.target || 1;
+  return Math.max(0, Math.min(1, n / target));
+}
+
+function currentStreak(habit) {
+  const today = currentDayKey();
+  const creationDay = habit.createdAt
+    ? dayKeyFromDate(new Date(habit.createdAt))
+    : null;
+  let day = today;
+  // If today isn't logged yet, don't penalise — start from yesterday.
+  if (habitValueForDay(habit, day) === undefined) day = daysAgo(day, 1);
+  let streak = 0;
+  for (let i = 0; i < 400; i++) {
+    if (creationDay && day < creationDay) break;
+    if (!isHabitDoneForDay(habit, day)) break;
+    streak++;
+    day = daysAgo(day, 1);
+  }
+  return streak;
+}
+
+function todayStateText(habit) {
+  const v = habitValueForDay(habit, currentDayKey());
+  if (v === undefined) return '—';
+  if (habit.type === 'tick') return v ? '✓' : '—';
+  if (habit.type === 'count') {
+    const unit = habit.unit ? ' ' + habit.unit : '';
+    return `${v}/${habit.target}${unit}`;
+  }
+  if (habit.type === 'percent') return `${v}%`;
+  return '';
+}
+
 // ---- Day helpers ------------------------------------------------------------
 
 function pad2(n) {
@@ -204,11 +266,116 @@ function wireTabbar() {
 
 // ---- View stubs -------------------------------------------------------------
 
+// ---- Home + heatmap ---------------------------------------------------------
+
 function renderHome() {
-  return h('div', { class: 'view' },
-    h('h1', 'Today'),
-    h('p', 'Home view — coming soon. You\'ll see your habits and mood here.'),
+  const view = h('div', { class: 'view' });
+
+  const displayDate = new Date().toLocaleDateString(undefined, {
+    weekday: 'long', month: 'long', day: 'numeric',
+  });
+  view.appendChild(h('h1', 'Today'));
+  view.appendChild(h('p', { class: 'muted', style: { marginBottom: '16px' } }, displayDate));
+
+  const active = state.habits.filter((x) => !x.archivedAt);
+
+  if (active.length === 0) {
+    view.appendChild(h('div', { class: 'stack', style: { marginTop: '24px' } },
+      h('p', 'No habits yet.'),
+      h('button', { class: 'primary', onClick: () => go('manage') }, 'Add your first habit'),
+    ));
+    return view;
+  }
+
+  const good = active.filter((x) => x.kind === 'good');
+  const bad  = active.filter((x) => x.kind === 'bad');
+
+  if (good.length) view.appendChild(renderHomeSection('Build', 'good', good));
+  if (bad.length)  view.appendChild(renderHomeSection('Break', 'bad', bad));
+
+  return view;
+}
+
+function renderHomeSection(title, kindClass, habits) {
+  return h('section', { class: 'section' },
+    h('div', { class: `section-head ${kindClass}` },
+      h('span', { class: 'dot' }),
+      title,
+    ),
+    h('div', { class: 'habit-list' },
+      habits.map((habit) => renderHomeHabitCard(habit)),
+    ),
   );
+}
+
+function renderHomeHabitCard(habit) {
+  const today = currentDayKey();
+  const done = isHabitDoneForDay(habit, today);
+  const streak = currentStreak(habit);
+
+  const card = h('div', {
+      class: `habit ${habit.kind}${done ? ' done' : ''}`,
+      style: { '--habit-color': habit.color },
+    },
+    h('div', { class: 'stripe' }),
+    h('div', null,
+      h('div', { class: 'title' }, habit.title),
+      h('div', { class: 'meta' }, habitMeta(habit)),
+      streak > 0
+        ? h('div', { style: { marginTop: '4px' } },
+            h('span', { class: 'streak' },
+              `🔥 ${streak}-day ${habit.kind === 'good' ? 'streak' : 'clean streak'}`),
+          )
+        : null,
+    ),
+    h('div', { class: 'state' }, todayStateText(habit)),
+  );
+
+  const wrapper = h('div');
+  wrapper.appendChild(card);
+  wrapper.appendChild(renderHeatmap(habit));
+  return wrapper;
+}
+
+function renderHeatmap(habit) {
+  const WEEKS = 12;
+  const todayKey = currentDayKey();
+  const todayDate = parseDayKey(todayKey);
+  const dow = todayDate.getDay();
+  const startOfThisWeek = new Date(
+    todayDate.getFullYear(), todayDate.getMonth(), todayDate.getDate() - dow,
+  );
+  const startOfGrid = new Date(startOfThisWeek);
+  startOfGrid.setDate(startOfThisWeek.getDate() - (WEEKS - 1) * 7);
+
+  const grid = h('div', {
+    class: 'heatmap',
+    style: { '--habit-color': habit.color },
+    'aria-label': `${habit.title} last ${WEEKS} weeks`,
+  });
+
+  for (let w = 0; w < WEEKS; w++) {
+    for (let d = 0; d < 7; d++) {
+      const cellDate = new Date(startOfGrid);
+      cellDate.setDate(startOfGrid.getDate() + w * 7 + d);
+      if (cellDate > todayDate) {
+        grid.appendChild(h('div', { class: 'cell', style: { visibility: 'hidden' } }));
+        continue;
+      }
+      const dayKey = dayKeyFromDate(cellDate);
+      const intensity = habitIntensityForDay(habit, dayKey);
+      const level = intensity === 0 ? 0 : Math.max(1, Math.ceil(intensity * 4));
+      const cls =
+        'cell' +
+        (level ? ` l${level}` : '') +
+        (dayKey === todayKey ? ' today' : '');
+      grid.appendChild(h('div', {
+        class: cls,
+        title: dayKey + (intensity > 0 ? ` · ${Math.round(intensity * 100)}%` : ''),
+      }));
+    }
+  }
+  return grid;
 }
 
 // ---- Manage: list + edit ----------------------------------------------------

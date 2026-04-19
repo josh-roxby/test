@@ -37,10 +37,10 @@ Working task list for the Tempo habit + mood PWA, broken into small chunks so ea
 - [x] 2e. Save / archive / delete actions wired to state
 
 ## Block 3 — Home + heatmaps
-- [ ] 3a. Home view layout: Build + Break sections, habit rows
-- [ ] 3b. Heatmap renderer (12 weeks, intensity by value/target, inverse for bad)
-- [ ] 3c. Streak calculation + pill
-- [ ] 3d. Today's state indicator per habit (done / not done)
+- [x] 3a. Home view layout: Build + Break sections, habit rows
+- [x] 3b. Heatmap renderer (12 weeks, intensity by value/target, inverse for bad)
+- [x] 3c. Streak calculation + pill
+- [x] 3d. Today's state indicator per habit (done / not done)
 
 ## Block 4 — Check-in flow
 - [ ] 4a. Modal sheet shell + progress bar + step navigation
