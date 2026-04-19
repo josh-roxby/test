@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Tempo">
+  <rect width="512" height="512" rx="112" fill="#0f1115"/>
+  <g transform="translate(128 128)">
+    <rect x="0"   y="0"   width="72" height="72" rx="14" fill="#22c55e"/>
+    <rect x="92"  y="0"   width="72" height="72" rx="14" fill="#7c9cff"/>
+    <rect x="184" y="0"   width="72" height="72" rx="14" fill="#2a2f3a"/>
+    <rect x="0"   y="92"  width="72" height="72" rx="14" fill="#5eead4"/>
+    <rect x="92"  y="92"  width="72" height="72" rx="14" fill="#fbbf24"/>
+    <rect x="184" y="92"  width="72" height="72" rx="14" fill="#22c55e"/>
+    <rect x="0"   y="184" width="72" height="72" rx="14" fill="#2a2f3a"/>
+    <rect x="92"  y="184" width="72" height="72" rx="14" fill="#22c55e"/>
+    <rect x="184" y="184" width="72" height="72" rx="14" fill="#86efac"/>
+  </g>
+</svg>
