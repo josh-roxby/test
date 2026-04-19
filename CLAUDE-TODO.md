@@ -112,9 +112,9 @@ state.countdowns = [
 - [x] 7e. Extend summary screen to surface sleep quality + diary snippets
 
 ## Block 8 — Diary tab
-- [ ] 8a. `renderDiary` route + list header
-- [ ] 8b. Timeline cards (date + good + challenge, newest first)
-- [ ] 8c. Empty state copy + CTA to start a check-in
+- [x] 8a. `renderDiary` route + list header
+- [x] 8b. Timeline cards (date + good + challenge, newest first)
+- [x] 8c. Empty state copy + CTA to start a check-in
 
 ## Block 9 — Countdowns data + themes
 - [ ] 9a. Countdown helpers (uid, sort by target, expiry check, annual-bump)

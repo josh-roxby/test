@@ -848,14 +848,107 @@ function deleteHabitConfirm(id) {
   toast('Deleted');
 }
 
-// ---- Diary / Countdowns / Reports (stubs; filled in Blocks 8–11) ------------
+// ---- Diary tab --------------------------------------------------------------
+
+function diaryStepIndex() {
+  return CHECKIN_STEPS.indexOf('diary');
+}
 
 function renderDiary() {
-  return h('div', { class: 'view' },
-    h('h1', 'Diary'),
-    h('p', { class: 'muted' }, 'Your short daily entries will live here.'),
-  );
+  const view = h('div', { class: 'view' });
+  view.appendChild(h('h1', 'Diary'));
+  view.appendChild(h('p', { class: 'muted', style: { marginBottom: '16px' } },
+    `140-char snapshots of each day.`));
+
+  const allDays = Object.keys(state.logs).sort().reverse();
+  const daysWithDiary = allDays.filter((day) => {
+    const d = state.logs[day]?.diary;
+    return d && (d.good || d.challenge);
+  });
+
+  const todayKey = currentDayKey();
+  const todayLog = state.logs[todayKey];
+  const todayHasDiary = !!(todayLog?.diary && (todayLog.diary.good || todayLog.diary.challenge));
+
+  if (!todayHasDiary) {
+    view.appendChild(h('button', {
+      class: 'primary block',
+      style: { marginBottom: '16px' },
+      onClick: () => openCheckIn(diaryStepIndex()),
+    }, 'Write today\'s entry'));
+  }
+
+  if (daysWithDiary.length === 0) {
+    view.appendChild(h('div', { class: 'summary' },
+      h('h2', { style: { color: 'var(--text)', fontSize: '1.15rem', margin: '0 0 6px' } },
+        'Nothing yet'),
+      h('p', { style: { margin: 0 } },
+        'Each day you check in, jot down one good thing and one challenge. They\'ll appear here as a timeline.'),
+    ));
+    return view;
+  }
+
+  const list = h('div', { class: 'stack' });
+  for (const day of daysWithDiary) list.appendChild(renderDiaryCard(day));
+  view.appendChild(list);
+
+  return view;
 }
+
+function renderDiaryCard(dayKey) {
+  const log = state.logs[dayKey];
+  const diary = log.diary;
+  const date = parseDayKey(dayKey);
+  const todayKey = currentDayKey();
+  const isToday = dayKey === todayKey;
+  const displayDate = isToday
+    ? 'Today'
+    : date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+
+  const moodFace = log.mood ? MOOD_OPTIONS.find((m) => m.value === log.mood) : null;
+  const sleepFace = log.sleep?.quality
+    ? SLEEP_FACES.find((s) => s.value === log.sleep.quality) : null;
+
+  const card = h('article', { class: 'prompt-card', style: { marginBottom: '10px' } });
+
+  card.appendChild(h('div', {
+    class: 'row between',
+    style: { marginBottom: '10px', alignItems: 'center' },
+  },
+    h('div', { class: 'kicker' }, displayDate),
+    h('div', { class: 'row', style: { gap: '8px', fontSize: '0.95rem' } },
+      sleepFace ? h('span', { title: `slept ${sleepFace.caption}` }, sleepFace.emoji) : null,
+      moodFace ? h('span', { title: `felt ${moodFace.caption}` }, moodFace.emoji) : null,
+    ),
+  ));
+
+  if (diary.good) {
+    card.appendChild(h('p', {
+      style: { margin: '0 0 6px', color: 'var(--text)', lineHeight: 1.45 },
+    }, h('span', { class: 'kicker' }, 'Good'), ' ', diary.good));
+  }
+  if (diary.challenge) {
+    card.appendChild(h('p', {
+      style: { margin: 0, color: 'var(--text)', lineHeight: 1.45 },
+    }, h('span', { class: 'kicker' }, 'Challenge'), ' ', diary.challenge));
+  }
+
+  if (isToday) {
+    card.appendChild(h('div', {
+      class: 'row',
+      style: { justifyContent: 'flex-end', marginTop: '10px' },
+    },
+      h('button', {
+        class: 'ghost small',
+        onClick: () => openCheckIn(diaryStepIndex()),
+      }, 'Edit'),
+    ));
+  }
+
+  return card;
+}
+
+// ---- Diary / Countdowns / Reports (stubs; filled in Blocks 8–11) ------------
 
 function renderCountdowns() {
   return h('div', { class: 'view' },
