@@ -2318,6 +2318,125 @@ function renderSummaryStep() {
   return wrap;
 }
 
+// ---- Push notifications -----------------------------------------------------
+
+let cachedVapidPublicKey = null;
+
+async function fetchVapidPublicKey() {
+  if (cachedVapidPublicKey) return cachedVapidPublicKey;
+  const resp = await fetch('/api/vapid-public');
+  if (!resp.ok) throw new Error('Failed to fetch VAPID key');
+  const { publicKey } = await resp.json();
+  if (!publicKey) throw new Error('Server returned empty VAPID key');
+  cachedVapidPublicKey = publicKey;
+  return publicKey;
+}
+
+// Push subscriptions use a URL-safe base64 variant. Convert it to the
+// Uint8Array that PushManager.subscribe expects as applicationServerKey.
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const normalised = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(normalised);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+// Returns 'unsupported' | 'granted' | 'denied' | 'default'.
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) return 'unsupported';
+  if (Notification.permission !== 'default') return Notification.permission;
+  try {
+    return await Notification.requestPermission();
+  } catch {
+    return 'denied';
+  }
+}
+
+function detectTimezone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
+async function subscribeToPush(reminderTime, timezone) {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    throw new Error('Push not supported on this browser');
+  }
+  const reg = await navigator.serviceWorker.ready;
+  const publicKey = await fetchVapidPublicKey();
+
+  let subscription = await reg.pushManager.getSubscription();
+  if (!subscription) {
+    subscription = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey),
+    });
+  }
+
+  const resp = await fetch('/api/subscribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      subscription: subscription.toJSON(),
+      reminderTime,
+      timezone,
+    }),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.error || `Subscribe failed (${resp.status})`);
+  }
+  return subscription;
+}
+
+async function unsubscribeFromPush() {
+  if (!('serviceWorker' in navigator)) return;
+  const reg = await navigator.serviceWorker.ready;
+  const subscription = await reg.pushManager.getSubscription();
+  if (!subscription) return;
+
+  // Tell the server first so the record is cleaned up even if the browser
+  // unsubscribe fails.
+  try {
+    await fetch('/api/unsubscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint: subscription.endpoint }),
+    });
+  } catch (err) {
+    console.warn('Failed to notify server of unsubscribe:', err);
+  }
+
+  try {
+    await subscription.unsubscribe();
+  } catch (err) {
+    console.warn('Browser unsubscribe failed:', err);
+  }
+}
+
+async function sendTestPush() {
+  if (!('serviceWorker' in navigator)) {
+    throw new Error('Service worker not supported');
+  }
+  const reg = await navigator.serviceWorker.ready;
+  const subscription = await reg.pushManager.getSubscription();
+  if (!subscription) throw new Error('Not subscribed — enable reminders first');
+
+  const resp = await fetch('/api/test-send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ endpoint: subscription.endpoint }),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.error || `Test send failed (${resp.status})`);
+  }
+}
+
 // ---- Service worker ---------------------------------------------------------
 
 function registerSW() {

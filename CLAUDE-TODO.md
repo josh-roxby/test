@@ -169,11 +169,11 @@ state.countdowns = [
 - [x] 19d. Bump SW `VERSION`
 
 ## Block 20 — Client subscribe helpers
-- [ ] 20a. Fetch `VAPID_PUBLIC_KEY` from `/api/vapid-public`
-- [ ] 20b. `requestNotificationPermission()`
-- [ ] 20c. `subscribeToPush()`
-- [ ] 20d. `unsubscribeFromPush()`
-- [ ] 20e. `urlBase64ToUint8Array()` util
+- [x] 20a. Fetch `VAPID_PUBLIC_KEY` from `/api/vapid-public`
+- [x] 20b. `requestNotificationPermission()`
+- [x] 20c. `subscribeToPush()`
+- [x] 20d. `unsubscribeFromPush()`
+- [x] 20e. `urlBase64ToUint8Array()` util
 
 ## Block 21 — Settings UI: Daily reminders
 - [ ] 21a. Extend settings schema + back-compat
