@@ -12,11 +12,13 @@ const DEFAULT_STATE = {
   countdowns: [],
   settings: {
     rolloverHour: 3,
+    lastExportAt: null, // ISO timestamp of most recent JSON export
     reminder: {
       enabled: false,
       time: '09:00',
       timezone: null,   // filled in when the user subscribes
       endpoint: null,   // last successful push subscription endpoint
+      dismissedDate: null, // YYYY-MM-DD — day the user dismissed the in-app nudge
     },
   },
 };
@@ -498,13 +500,31 @@ function svgEl(tag, attrs, ...children) {
 }
 
 let toastTimer = null;
-function toast(message, ms = 2000) {
+// toast('Saved')              — plain message, auto-dismiss in 2s
+// toast('Saved', 4000)        — custom duration
+// toast('Archived', { action:'Undo', onAction: fn })  — with inline action
+function toast(message, options = {}) {
+  if (typeof options === 'number') options = { ms: options };
+  const hasAction = !!(options.action && options.onAction);
+  const ms = options.ms ?? (hasAction ? 5000 : 2000);
+
   let el = qs('#toast');
   if (!el) {
     el = h('div', { id: 'toast', role: 'status', 'aria-live': 'polite' });
     document.body.appendChild(el);
   }
-  el.textContent = message;
+  el.replaceChildren();
+  el.appendChild(document.createTextNode(message));
+  if (hasAction) {
+    el.appendChild(h('button', {
+      type: 'button',
+      onClick: () => {
+        clearTimeout(toastTimer);
+        el.classList.remove('show');
+        try { options.onAction(); } catch (err) { console.error(err); }
+      },
+    }, options.action));
+  }
   el.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove('show'), ms);
@@ -542,6 +562,7 @@ function render() {
   else app.appendChild(renderHome());
   updateTabbar();
   updateGear();
+  updateAppBadge();
 }
 
 function updateTabbar() {
@@ -575,6 +596,74 @@ function wireGear() {
   });
 }
 
+// ---- Reminder nudge (in-app fallback when push isn't active) ----------------
+
+function reminderTimePassed() {
+  const t = state.settings.reminder?.time || '18:00';
+  const [th, tm] = t.split(':').map(Number);
+  const now = new Date();
+  return now.getHours() * 60 + now.getMinutes() >= th * 60 + tm;
+}
+
+function pushReminderActive() {
+  const r = state.settings.reminder;
+  return !!(r?.enabled && r?.endpoint);
+}
+
+function shouldShowReminderNudge() {
+  if (pushReminderActive()) return false;         // real push is doing the job
+  if (nextIncompleteStep() === null) return false; // already checked in
+  if (state.settings.reminder?.dismissedDate === currentDayKey()) return false;
+  return reminderTimePassed();
+}
+
+function dismissReminderToday() {
+  state.settings.reminder = state.settings.reminder || {};
+  state.settings.reminder.dismissedDate = currentDayKey();
+  save();
+  render();
+}
+
+function renderReminderBanner() {
+  const time = state.settings.reminder?.time || '18:00';
+  return h('div', {
+    class: 'reminder-banner',
+    role: 'button',
+    tabindex: '0',
+    onClick: () => openCheckIn(),
+  },
+    h('div', null,
+      h('div', { style: { fontWeight: 600 } },
+        "Haven't checked in yet today"),
+      h('div', { class: 'small muted' },
+        `You usually check in by ${time}. Tap to start.`),
+    ),
+    h('button', {
+      class: 'ghost',
+      style: { padding: '6px 10px', minHeight: '32px' },
+      onClick: (e) => {
+        e.stopPropagation();
+        dismissReminderToday();
+      },
+      'aria-label': 'Dismiss for today',
+    }, '✕'),
+  );
+}
+
+function updateAppBadge() {
+  try {
+    if ('setAppBadge' in navigator) {
+      if (nextIncompleteStep() !== null && reminderTimePassed()) {
+        navigator.setAppBadge(1);
+      } else {
+        navigator.clearAppBadge?.();
+      }
+    }
+  } catch {
+    // Badging API can throw on some permission states; swallow quietly.
+  }
+}
+
 // ---- View stubs -------------------------------------------------------------
 
 // ---- Home + heatmap ---------------------------------------------------------
@@ -603,40 +692,42 @@ function renderHome() {
     const moodFace = MOOD_OPTIONS.find((m) => m.value === log.mood);
     const sleepFace = log.sleep?.quality
       ? SLEEP_FACES.find((s) => s.value === log.sleep.quality) : null;
-    const row = h('div', { class: 'row', style: { gap: '16px' } });
+    const summary = h('div', {
+      class: 'row between',
+      style: {
+        marginBottom: '16px',
+        padding: '10px 14px',
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
+        borderRadius: '999px',
+        alignItems: 'center',
+      },
+    });
+    const inner = h('div', { class: 'row', style: { gap: '10px', fontSize: '0.95rem' } });
     if (sleepFace) {
-      row.appendChild(h('div', null,
-        h('div', { class: 'small muted' }, 'slept'),
-        h('div', { style: { fontSize: '1.2rem', marginTop: '2px' } },
-          `${sleepFace.emoji} ${sleepFace.caption}`),
-      ));
+      inner.appendChild(h('span', null, `😴 ${sleepFace.caption}`));
+      inner.appendChild(h('span', { class: 'muted small' }, '·'));
     }
     if (moodFace) {
-      row.appendChild(h('div', null,
-        h('div', { class: 'small muted' }, 'mood'),
-        h('div', { style: { fontSize: '1.2rem', marginTop: '2px' } },
-          `${moodFace.emoji} ${moodFace.caption}`),
-      ));
+      inner.appendChild(h('span', null, `${moodFace.emoji} ${moodFace.caption}`));
     }
-    view.appendChild(h('div', { class: 'summary', style: { marginBottom: '16px' } },
-      h('div', { class: 'row between', style: { alignItems: 'flex-start' } },
-        row,
-        h('button', {
-          class: 'ghost small',
-          onClick: () => openCheckIn(0),
-        }, 'Edit'),
-      ),
-    ));
+    summary.appendChild(inner);
+    summary.appendChild(h('button', {
+      class: 'ghost small',
+      style: { minHeight: '32px', padding: '4px 10px' },
+      onClick: () => openCheckIn(0),
+    }, 'Edit'));
+    view.appendChild(summary);
   }
 
-  // Next upcoming countdown (peek strip)
-  const nextCountdown = sortedUpcomingCountdowns()[0];
-  if (nextCountdown) {
-    view.appendChild(renderCountdownTile(nextCountdown, {
-      style: { marginBottom: '16px', minHeight: '90px' },
-      onClick: () => go('countdowns'),
-    }));
+  // In-app reminder nudge (shown only when push isn't active and user is past
+  // their reminder time with an incomplete check-in).
+  if (shouldShowReminderNudge()) {
+    view.appendChild(renderReminderBanner());
   }
+
+  // 2×2 glanceable tile grid (Diary · Habits · Countdowns · Reports)
+  view.appendChild(renderGlancableTiles());
 
   const active = state.habits.filter((x) => !x.archivedAt);
 
@@ -660,6 +751,9 @@ function renderHome() {
   if (good.length) view.appendChild(renderHomeSection('Build', 'good', good));
   if (bad.length)  view.appendChild(renderHomeSection('Break', 'bad', bad));
 
+  // Rotating stats card (at the bottom)
+  view.appendChild(renderHomeStatsCard());
+
   return view;
 }
 
@@ -672,6 +766,180 @@ function renderHomeSection(title, kindClass, habits) {
     h('div', { class: 'habit-list' },
       habits.map((habit) => renderHomeHabitCard(habit)),
     ),
+  );
+}
+
+// ---- Stats helpers ----------------------------------------------------------
+
+function totalDaysOnTempo() {
+  const keys = Object.keys(state.logs);
+  if (keys.length === 0) return 0;
+  const earliest = keys.sort()[0];
+  const earliestDate = parseDayKey(earliest);
+  const today = parseDayKey(currentDayKey());
+  const diff = Math.floor((today - earliestDate) / (24 * 3600 * 1000)) + 1;
+  return Math.max(1, diff);
+}
+
+function totalCheckIns() {
+  return Object.values(state.logs).filter((log) => log?.completedAt).length;
+}
+
+function totalDiaryEntries() {
+  return Object.values(state.logs)
+    .filter((log) => log?.diary && (log.diary.good || log.diary.challenge))
+    .length;
+}
+
+function bestStreakAllTime() {
+  const active = state.habits.filter((x) => !x.archivedAt);
+  if (active.length === 0) return 0;
+  return Math.max(0, ...active.map((h) => longestStreak(h)));
+}
+
+// ---- Home: glanceable tiles + stats card ------------------------------------
+
+function renderGlancableTiles() {
+  const grid = h('div', { class: 'tile-grid' });
+
+  // Diary
+  const todayKey = currentDayKey();
+  const todayLog = state.logs[todayKey];
+  const todayDiary = todayLog?.diary;
+  const hasToday = todayDiary && (todayDiary.good || todayDiary.challenge);
+
+  let diaryPreview;
+  if (hasToday) {
+    const snippet = (todayDiary.good || todayDiary.challenge).slice(0, 48);
+    diaryPreview = h('div', { class: 'tile-sub' }, snippet + (snippet.length >= 48 ? '…' : ''));
+  } else {
+    diaryPreview = h('div', { class: 'tile-sub' }, 'Write today\'s entry');
+  }
+  grid.appendChild(tile('📖 Diary', hasToday ? 'Today' : 'Open', diaryPreview, () => go('diary')));
+
+  // Habits
+  const activeHabits = state.habits.filter((x) => !x.archivedAt);
+  const doneHabits = activeHabits.filter((ht) => isHabitDoneForDay(ht, todayKey)).length;
+  let habitsPreview;
+  if (activeHabits.length === 0) {
+    habitsPreview = h('div', { class: 'tile-sub' }, 'Add your first');
+  } else {
+    const pct = Math.round((doneHabits / activeHabits.length) * 100);
+    habitsPreview = h('div', { class: 'tile-progress' },
+      h('div', {
+        class: 'tile-progress-fill',
+        style: { width: `${pct}%` },
+      }),
+    );
+  }
+  const habitsValue = activeHabits.length === 0
+    ? 'No habits'
+    : `${doneHabits}/${activeHabits.length} done`;
+  grid.appendChild(tile('✓ Habits', habitsValue, habitsPreview, () => go('habits')));
+
+  // Countdowns
+  const nextCountdown = sortedUpcomingCountdowns()[0];
+  let countdownsValue, countdownsPreview, countdownsTheme;
+  if (nextCountdown) {
+    countdownsValue = nextCountdown.title;
+    countdownsPreview = h('div', { class: 'tile-sub' }, formatCountdownRemaining(nextCountdown));
+    countdownsTheme = nextCountdown.theme || null;
+  } else {
+    countdownsValue = 'None yet';
+    countdownsPreview = h('div', { class: 'tile-sub' }, 'Add an event');
+  }
+  grid.appendChild(tile('⏳ Soon', countdownsValue, countdownsPreview, () => go('countdowns'), countdownsTheme));
+
+  // Reports
+  const spark = renderMoodSparkline();
+  const reportsValue = spark ? 'Mood · 7d' : 'Keep logging';
+  const reportsPreview = spark || h('div', { class: 'tile-sub' }, 'Need more data');
+  grid.appendChild(tile('📊 Reports', reportsValue, reportsPreview, () => go('reports')));
+
+  return grid;
+}
+
+function tile(label, value, preview, onClick, theme = null) {
+  return h('button', {
+    class: 'tile' + (theme ? ` theme-${theme}` : ''),
+    type: 'button',
+    onClick,
+  },
+    h('div', { class: 'tile-label' }, label),
+    h('div', { class: 'tile-value' }, value),
+    preview,
+  );
+}
+
+function renderMoodSparkline() {
+  const values = moodSeries('week');
+  const valid = values.filter((v) => v != null);
+  if (valid.length < 2) return null;
+
+  const width = 100, height = 36;
+  const min = 1, max = 5;
+  const n = values.length;
+  const xs = (i) => (n === 1 ? width / 2 : (i / (n - 1)) * width);
+  const ys = (v) => height - 3 - ((v - min) / (max - min)) * (height - 6);
+
+  const svg = svgEl('svg', {
+    viewBox: `0 0 ${width} ${height}`,
+    width: '100%', height,
+    preserveAspectRatio: 'none',
+    'aria-label': 'Mood sparkline',
+  });
+
+  const segs = [];
+  let seg = [];
+  values.forEach((v, i) => {
+    if (v == null) {
+      if (seg.length) segs.push(seg);
+      seg = [];
+    } else {
+      seg.push({ x: xs(i), y: ys(v) });
+    }
+  });
+  if (seg.length) segs.push(seg);
+
+  for (const s of segs) {
+    if (s.length >= 2) {
+      const d = s.map((p, i) =>
+        `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
+      svg.appendChild(svgEl('path', {
+        d,
+        stroke: '#7c9cff', 'stroke-width': 2, fill: 'none',
+        'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+      }));
+    }
+  }
+  // Last-point dot for current mood.
+  const last = values.slice().reverse().find((v) => v != null);
+  if (last != null) {
+    const lastIdx = values.lastIndexOf(last);
+    svg.appendChild(svgEl('circle', {
+      cx: xs(lastIdx), cy: ys(last), r: 2.5, fill: '#7c9cff',
+    }));
+  }
+  return svg;
+}
+
+function renderHomeStatsCard() {
+  const d = totalDaysOnTempo();
+  const c = totalCheckIns();
+  const e = totalDiaryEntries();
+  const b = bestStreakAllTime();
+
+  if (d === 0 && c === 0 && e === 0) return h('span'); // nothing to show
+
+  const stats = [];
+  if (d > 0) stats.push(`🗓 ${d} day${d === 1 ? '' : 's'} on Tempo`);
+  if (b > 0) stats.push(`🔥 ${b}-day best streak`);
+  if (e > 0) stats.push(`📖 ${e} entr${e === 1 ? 'y' : 'ies'}`);
+  if (c > 0 && stats.length < 2) stats.push(`🌱 ${c} check-in${c === 1 ? '' : 's'}`);
+
+  return h('div', { class: 'home-stats' },
+    stats.map((s, i) =>
+      h('span', null, s + (i < stats.length - 1 ? '  ·  ' : ''))),
   );
 }
 
@@ -1071,21 +1339,37 @@ function saveHabitDraft(draft, isNew) {
 function archiveHabit(id) {
   const habit = state.habits.find((x) => x.id === id);
   if (!habit) return;
+  const prev = habit.archivedAt;
   habit.archivedAt = new Date().toISOString();
   save();
   editingHabitId = null;
   render();
-  toast('Archived');
+  toast('Archived', {
+    action: 'Undo',
+    onAction: () => {
+      habit.archivedAt = prev;
+      save();
+      render();
+    },
+  });
 }
 
 function unarchiveHabit(id) {
   const habit = state.habits.find((x) => x.id === id);
   if (!habit) return;
+  const prev = habit.archivedAt;
   habit.archivedAt = null;
   save();
   editingHabitId = null;
   render();
-  toast('Unarchived');
+  toast('Unarchived', {
+    action: 'Undo',
+    onAction: () => {
+      habit.archivedAt = prev;
+      save();
+      render();
+    },
+  });
 }
 
 function deleteHabitConfirm(id) {
@@ -1093,6 +1377,14 @@ function deleteHabitConfirm(id) {
   if (!habit) return;
   const ok = confirm(`Delete "${habit.title}" and all its history permanently?`);
   if (!ok) return;
+
+  // Snapshot for undo
+  const snapshot = { habit: { ...habit }, history: {} };
+  for (const key of Object.keys(state.logs)) {
+    const val = state.logs[key]?.habits?.[id];
+    if (val !== undefined) snapshot.history[key] = val;
+  }
+
   state.habits = state.habits.filter((x) => x.id !== id);
   for (const key of Object.keys(state.logs)) {
     if (state.logs[key]?.habits) delete state.logs[key].habits[id];
@@ -1100,7 +1392,21 @@ function deleteHabitConfirm(id) {
   save();
   editingHabitId = null;
   render();
-  toast('Deleted');
+
+  toast('Deleted', {
+    action: 'Undo',
+    onAction: () => {
+      state.habits.push(snapshot.habit);
+      for (const [key, val] of Object.entries(snapshot.history)) {
+        const log = state.logs[key];
+        if (!log) continue;
+        if (!log.habits) log.habits = {};
+        log.habits[id] = val;
+      }
+      save();
+      render();
+    },
+  });
 }
 
 // ---- Diary tab --------------------------------------------------------------
@@ -1460,32 +1766,306 @@ function saveCountdownDraft(draft, isNew) {
 function archiveCountdown(id) {
   const c = state.countdowns.find((x) => x.id === id);
   if (!c) return;
+  const prev = c.archivedAt;
   c.archivedAt = new Date().toISOString();
   save();
   editingCountdownId = null;
   render();
-  toast('Archived');
+  toast('Archived', {
+    action: 'Undo',
+    onAction: () => { c.archivedAt = prev; save(); render(); },
+  });
 }
 
 function unarchiveCountdown(id) {
   const c = state.countdowns.find((x) => x.id === id);
   if (!c) return;
+  const prev = c.archivedAt;
   c.archivedAt = null;
   save();
   editingCountdownId = null;
   render();
-  toast('Unarchived');
+  toast('Unarchived', {
+    action: 'Undo',
+    onAction: () => { c.archivedAt = prev; save(); render(); },
+  });
 }
 
 function deleteCountdownConfirm(id) {
   const c = state.countdowns.find((x) => x.id === id);
   if (!c) return;
   if (!confirm(`Delete "${c.title}"?`)) return;
+  const snapshot = { ...c };
   state.countdowns = state.countdowns.filter((x) => x.id !== id);
   save();
   editingCountdownId = null;
   render();
-  toast('Deleted');
+  toast('Deleted', {
+    action: 'Undo',
+    onAction: () => { state.countdowns.push(snapshot); save(); render(); },
+  });
+}
+
+// ---- "At a glance" Wrapped-style modal --------------------------------------
+
+let wrappedOpen = false;
+let wrappedRange = 'week';
+let wrappedStage = 0;
+
+function openWrapped(range = 'week') {
+  wrappedOpen = true;
+  wrappedRange = range;
+  wrappedStage = 0;
+  renderWrapped();
+}
+
+function closeWrapped() {
+  wrappedOpen = false;
+  const scrim = qs('.wrapped-scrim');
+  if (scrim) scrim.remove();
+}
+
+function wrappedNext() {
+  const stages = buildWrappedStages(wrappedAggregate(wrappedRange));
+  if (wrappedStage >= stages.length - 1) { closeWrapped(); return; }
+  wrappedStage++;
+  renderWrapped();
+}
+
+function wrappedPrev() {
+  if (wrappedStage <= 0) return;
+  wrappedStage--;
+  renderWrapped();
+}
+
+function wrappedAggregate(range) {
+  const days = rangeDayKeys(range);
+  let peakMood = null, peakMoodDay = null;
+  let moodSum = 0, moodCount = 0;
+  let bestSleepQ = null, bestSleepDay = null;
+  let sleepQSum = 0, sleepQCount = 0;
+  let sleepHSum = 0, sleepHCount = 0;
+  let loggedDays = 0;
+
+  for (const day of days) {
+    const log = state.logs[day];
+    if (!log) continue;
+    if (log.mood != null || log.sleep?.quality != null || (log.habits && Object.keys(log.habits).length)) {
+      loggedDays++;
+    }
+    if (log.mood != null) {
+      moodSum += log.mood; moodCount++;
+      if (peakMood === null || log.mood > peakMood) { peakMood = log.mood; peakMoodDay = day; }
+    }
+    if (log.sleep?.quality != null) {
+      sleepQSum += log.sleep.quality; sleepQCount++;
+      if (bestSleepQ === null || log.sleep.quality > bestSleepQ) {
+        bestSleepQ = log.sleep.quality;
+        bestSleepDay = day;
+      }
+    }
+    if (log.sleep?.hours != null) { sleepHSum += log.sleep.hours; sleepHCount++; }
+  }
+
+  const active = state.habits.filter((x) => !x.archivedAt);
+  let topHabit = null, topHabitDone = 0;
+  for (const ht of active) {
+    const done = days.filter((d) => isHabitDoneForDay(ht, d)).length;
+    if (done > topHabitDone) { topHabitDone = done; topHabit = ht; }
+  }
+
+  let longest = 0, longestHabit = null;
+  for (const ht of active) {
+    const s = longestStreak(ht);
+    if (s > longest) { longest = s; longestHabit = ht; }
+  }
+
+  const diaryEntries = days
+    .map((d) => ({ day: d, diary: state.logs[d]?.diary }))
+    .filter((e) => e.diary && (e.diary.good || e.diary.challenge));
+
+  return {
+    range,
+    totalDays: days.length,
+    loggedDays,
+    moodAvg: moodCount ? moodSum / moodCount : null,
+    peakMood, peakMoodDay,
+    sleepQualAvg: sleepQCount ? sleepQSum / sleepQCount : null,
+    bestSleepQ, bestSleepDay,
+    sleepHoursAvg: sleepHCount ? sleepHSum / sleepHCount : null,
+    topHabit, topHabitDone,
+    longestStreakInRange: longest, longestStreakHabit: longestHabit,
+    diaryCount: diaryEntries.length,
+    diaryMoment: diaryEntries[diaryEntries.length - 1] || null,
+  };
+}
+
+function formatWrappedDate(dayKey) {
+  return parseDayKey(dayKey).toLocaleDateString(undefined, {
+    weekday: 'short', month: 'short', day: 'numeric',
+  });
+}
+
+// Produces an ordered list of stages to show, skipping ones with no data.
+function buildWrappedStages(stats) {
+  const rangeLabel = stats.range === 'month' ? 'month' : 'week';
+  const stages = [];
+
+  stages.push({
+    kind: 'intro',
+    title: `Your ${rangeLabel} at a glance`,
+    emoji: '✨',
+    sub: `${stats.loggedDays} of ${stats.totalDays} day${stats.totalDays === 1 ? '' : 's'} logged`,
+  });
+
+  if (stats.peakMood != null) {
+    const face = MOOD_OPTIONS.find((m) => m.value === stats.peakMood);
+    stages.push({
+      kind: 'mood',
+      title: 'Your mood peak',
+      emoji: face?.emoji || '🙂',
+      big: face?.caption || '',
+      sub: stats.peakMoodDay ? `on ${formatWrappedDate(stats.peakMoodDay)}` : '',
+      footer: stats.moodAvg != null ? `Average: ${stats.moodAvg.toFixed(1)} / 5` : null,
+    });
+  }
+
+  if (stats.bestSleepQ != null) {
+    const face = SLEEP_FACES.find((s) => s.value === stats.bestSleepQ);
+    const hoursLine = stats.sleepHoursAvg != null
+      ? `Averaged ${stats.sleepHoursAvg.toFixed(1)}h a night`
+      : (stats.sleepQualAvg != null ? `Quality ${stats.sleepQualAvg.toFixed(1)} / 5` : null);
+    stages.push({
+      kind: 'sleep',
+      title: 'Your best sleep',
+      emoji: face?.emoji || '😴',
+      big: face?.caption || '',
+      sub: stats.bestSleepDay ? `on ${formatWrappedDate(stats.bestSleepDay)}` : '',
+      footer: hoursLine,
+    });
+  }
+
+  if (stats.topHabit) {
+    stages.push({
+      kind: 'habit',
+      title: 'Your top habit',
+      emoji: stats.topHabit.kind === 'good' ? '🌳' : '🛑',
+      big: stats.topHabit.title,
+      sub: `${stats.topHabitDone} of ${stats.totalDays} days`,
+      color: stats.topHabit.color,
+    });
+  }
+
+  if (stats.longestStreakInRange > 0 && stats.longestStreakHabit) {
+    stages.push({
+      kind: 'streak',
+      title: 'Your longest streak',
+      emoji: '🔥',
+      big: `${stats.longestStreakInRange} day${stats.longestStreakInRange === 1 ? '' : 's'}`,
+      sub: stats.longestStreakHabit.title,
+      color: stats.longestStreakHabit.color,
+    });
+  }
+
+  if (stats.diaryMoment) {
+    const diary = stats.diaryMoment.diary;
+    const text = (diary.good || diary.challenge).slice(0, 140);
+    stages.push({
+      kind: 'diary',
+      title: 'A moment from your diary',
+      emoji: '📖',
+      big: `"${text}"`,
+      sub: formatWrappedDate(stats.diaryMoment.day),
+    });
+  }
+
+  stages.push({
+    kind: 'outro',
+    title: 'Keep going',
+    emoji: '🌱',
+    sub: 'See you tomorrow.',
+  });
+
+  return stages;
+}
+
+function renderWrapped() {
+  const existing = qs('.wrapped-scrim');
+  if (existing) existing.remove();
+  if (!wrappedOpen) return;
+
+  const stats = wrappedAggregate(wrappedRange);
+  const stages = buildWrappedStages(stats);
+  if (wrappedStage >= stages.length) wrappedStage = stages.length - 1;
+  const stage = stages[wrappedStage];
+
+  const scrim = h('div', {
+    class: 'scrim wrapped-scrim',
+    onClick: (e) => {
+      if (e.target.classList.contains('wrapped-scrim')) closeWrapped();
+    },
+  });
+
+  const sheet = h('div', { class: 'sheet wrapped-sheet' });
+
+  // Header: close + range toggle + progress dots
+  const header = h('header', null,
+    h('button', {
+      class: 'ghost',
+      style: { padding: '6px 10px', minHeight: '36px' },
+      onClick: closeWrapped,
+      'aria-label': 'Close',
+    }, '✕'),
+    h('div', { class: 'segmented', style: { gridAutoColumns: 'minmax(60px, 1fr)' } },
+      h('button', {
+        class: wrappedRange === 'week' ? 'on' : '',
+        onClick: () => { wrappedRange = 'week'; wrappedStage = 0; renderWrapped(); },
+        type: 'button',
+      }, 'Week'),
+      h('button', {
+        class: wrappedRange === 'month' ? 'on' : '',
+        onClick: () => { wrappedRange = 'month'; wrappedStage = 0; renderWrapped(); },
+        type: 'button',
+      }, 'Month'),
+    ),
+    h('div', { class: 'wrapped-dots', 'aria-label': 'Progress' },
+      ...stages.map((_, i) =>
+        h('span', { class: 'wrapped-dot' + (i === wrappedStage ? ' active' : '') }),
+      ),
+    ),
+  );
+  sheet.appendChild(header);
+
+  // Body: current stage, full-bleed
+  const body = h('div', {
+    class: 'wrapped-body',
+    style: stage.color ? { background: `linear-gradient(180deg, ${stage.color}22 0%, transparent 70%)` } : undefined,
+    onClick: wrappedNext,
+  });
+  body.appendChild(h('div', { class: 'wrapped-stage' },
+    h('div', { class: 'wrapped-emoji' }, stage.emoji),
+    h('h2', { class: 'wrapped-title' }, stage.title),
+    stage.big ? h('div', { class: 'wrapped-big' }, stage.big) : null,
+    stage.sub ? h('div', { class: 'wrapped-sub' }, stage.sub) : null,
+    stage.footer ? h('div', { class: 'wrapped-footer' }, stage.footer) : null,
+  ));
+  sheet.appendChild(body);
+
+  // Footer: nav buttons
+  const footer = h('footer');
+  if (wrappedStage > 0) {
+    footer.appendChild(h('button', { class: 'ghost', onClick: wrappedPrev }, 'Back'));
+  }
+  footer.appendChild(h('span', { class: 'grow' }));
+  const isLast = wrappedStage === stages.length - 1;
+  footer.appendChild(h('button', {
+    class: 'primary',
+    onClick: wrappedNext,
+  }, isLast ? 'Done' : 'Next'));
+  sheet.appendChild(footer);
+
+  scrim.appendChild(sheet);
+  document.body.appendChild(scrim);
 }
 
 // ---- Reports tab ------------------------------------------------------------
@@ -1642,7 +2222,14 @@ function legendItem(color, label) {
 
 function renderReports() {
   const view = h('div', { class: 'view' });
-  view.appendChild(h('h1', { style: { marginBottom: '8px' } }, 'Reports'));
+  view.appendChild(h('div', { class: 'row between', style: { marginBottom: '8px', alignItems: 'center' } },
+    h('h1', { style: { margin: 0 } }, 'Reports'),
+    h('button', {
+      class: 'ghost small',
+      style: { minHeight: '36px', padding: '6px 12px' },
+      onClick: () => openWrapped(reportsRange),
+    }, '✨ At a glance'),
+  ));
 
   const noLogs = Object.keys(state.logs).length === 0;
   const noHabits = state.habits.length === 0;
@@ -1913,7 +2500,8 @@ function renderRemindersSection() {
   }
 
   wrap.appendChild(h('p', { class: 'small muted' },
-    'Get a push reminder at your chosen time each day. Requires this PWA to be installed on your device (Android: "Add to Home screen").'));
+    'Get a push reminder at your chosen time each day. Requires this PWA to be installed on your device (Android: "Add to Home screen"). ' +
+    'If push isn\'t granted or the browser doesn\'t support it, Tempo falls back to an in-app banner when you open the app past your reminder time.'));
 
   // Toggle row
   const toggleRow = h('div', {
@@ -2118,6 +2706,10 @@ function renderSettings() {
   const view = h('div', { class: 'view' });
   view.appendChild(h('h1', 'Settings'));
 
+  // --- Backup nudge (shows if data exists and no export in 30 days) ---
+  const nudge = renderBackupNudge();
+  if (nudge) view.appendChild(nudge);
+
   // --- Day rollover ---
   view.appendChild(h('h2', { style: { marginTop: '20px' } }, 'Day rollover'));
   view.appendChild(h('p', { class: 'small muted' },
@@ -2203,11 +2795,50 @@ function exportJSON() {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+    state.settings.lastExportAt = new Date().toISOString();
+    save();
+    render();
     toast('Exported');
   } catch (err) {
     console.error(err);
     toast('Export failed');
   }
+}
+
+function shouldNudgeBackup() {
+  const last = state.settings.lastExportAt;
+  // If the user has no meaningful data yet, don't nag.
+  const hasData = state.habits.length > 0 || Object.keys(state.logs).length > 0 || state.countdowns.length > 0;
+  if (!hasData) return false;
+  if (!last) return true;
+  const thirtyDays = 30 * 24 * 3600 * 1000;
+  return Date.now() - new Date(last).getTime() > thirtyDays;
+}
+
+function daysSince(iso) {
+  return Math.floor((Date.now() - new Date(iso).getTime()) / (24 * 3600 * 1000));
+}
+
+function renderBackupNudge() {
+  if (!shouldNudgeBackup()) return null;
+  const last = state.settings.lastExportAt;
+  const sub = last
+    ? `Last export ${daysSince(last)} days ago. Browsers can clear local data.`
+    : "You haven't exported yet. Browsers can clear local data.";
+  return h('div', {
+    class: 'reminder-banner',
+    style: { marginBottom: '16px' },
+  },
+    h('div', null,
+      h('div', { style: { fontWeight: 600 } }, 'Back up your data'),
+      h('div', { class: 'small muted' }, sub),
+    ),
+    h('button', {
+      class: 'ghost small',
+      style: { minHeight: '32px', padding: '6px 12px' },
+      onClick: exportJSON,
+    }, 'Export now'),
+  );
 }
 
 function handleImport(file) {

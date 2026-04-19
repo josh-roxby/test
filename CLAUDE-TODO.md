@@ -217,32 +217,32 @@ state.countdowns = [
 - [x] 13e. Back button returns to home
 
 ## Block 14 — Home stats card + 2×2 glanceable tiles
-- [ ] 14a. Stats helpers (totalDaysOnTempo, totalCheckIns, totalDiaryEntries, bestStreakAllTime)
-- [ ] 14b. Rotating stats card copy
-- [ ] 14c. Diary preview tile (last good snippet or CTA)
-- [ ] 14d. Habits preview tile (X of Y done + progress)
-- [ ] 14e. Countdowns preview tile (next event)
-- [ ] 14f. Reports preview tile (7-day mood sparkline)
-- [ ] 14g. 2×2 grid CSS + narrow fallback
-- [ ] 14h. Tighten check-in status card
+- [x] 14a. Stats helpers (totalDaysOnTempo, totalCheckIns, totalDiaryEntries, bestStreakAllTime)
+- [x] 14b. Rotating stats card copy
+- [x] 14c. Diary preview tile (last good snippet or CTA)
+- [x] 14d. Habits preview tile (X of Y done + progress)
+- [x] 14e. Countdowns preview tile (next event)
+- [x] 14f. Reports preview tile (7-day mood sparkline)
+- [x] 14g. 2×2 grid CSS + narrow fallback
+- [x] 14h. Tighten check-in status card
 
 ## Block 15 — "At a glance" (Wrapped-style) modal
-- [ ] 15a. Aggregators (peak mood day, hardest day, best sleep, top habit, longest streak, diary moment)
-- [ ] 15b. Modal shell + stage nav
-- [ ] 15c. Stage renderers
-- [ ] 15d. Week / Month toggle
-- [ ] 15e. Access button on Reports header
-- [ ] 15f. Animation polish
+- [x] 15a. Aggregators (peak mood day, hardest day, best sleep, top habit, longest streak, diary moment)
+- [x] 15b. Modal shell + stage nav
+- [x] 15c. Stage renderers
+- [x] 15d. Week / Month toggle
+- [x] 15e. Access button on Reports header
+- [x] 15f. Animation polish
 
 ## Block 16 — In-app reminder nudge (fallback for no-push users)
-- [ ] 16a. Sticky banner on Today past `settings.reminder.time` when check-in incomplete (only if push is NOT active)
-- [ ] 16b. Dismiss-for-today button on the banner
-- [ ] 16c. Badging API (`navigator.setAppBadge(1)`) when check-in incomplete past reminder
-- [ ] 16d. Settings copy explaining push vs in-app fallback
+- [x] 16a. Sticky banner on Today past `settings.reminder.time` when check-in incomplete (only if push is NOT active)
+- [x] 16b. Dismiss-for-today button on the banner
+- [x] 16c. Badging API (`navigator.setAppBadge(1)`) when check-in incomplete past reminder
+- [x] 16d. Settings copy explaining push vs in-app fallback
 
 ## Block 17 — Fast wins: undo + backup nudge
-- [ ] 17a. Extend `toast(message, { action, onAction, duration })` with inline action button
-- [ ] 17b. Undo for habit archive / soft-delete
-- [ ] 17c. Undo for countdown archive / delete
-- [ ] 17d. `settings.lastExportAt` timestamp on export
-- [ ] 17e. Monthly backup nudge banner on Settings
+- [x] 17a. Extend `toast(message, { action, onAction, duration })` with inline action button
+- [x] 17b. Undo for habit archive / soft-delete
+- [x] 17c. Undo for countdown archive / delete
+- [x] 17d. `settings.lastExportAt` timestamp on export
+- [x] 17e. Monthly backup nudge banner on Settings
