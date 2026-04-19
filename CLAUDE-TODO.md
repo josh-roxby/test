@@ -163,10 +163,10 @@ state.countdowns = [
 - [x] 18f. `/api/test-send.js` — POST, fires an immediate test push to the caller's endpoint
 
 ## Block 19 — Service worker handlers
-- [ ] 19a. `push` event → `registration.showNotification`
-- [ ] 19b. `notificationclick` → focus app, open check-in
-- [ ] 19c. `pushsubscriptionchange` → re-subscribe on backend
-- [ ] 19d. Bump SW `VERSION`
+- [x] 19a. `push` event → `registration.showNotification`
+- [x] 19b. `notificationclick` → focus app, open check-in
+- [x] 19c. `pushsubscriptionchange` → re-subscribe on backend
+- [x] 19d. Bump SW `VERSION`
 
 ## Block 20 — Client subscribe helpers
 - [ ] 20a. Fetch `VAPID_PUBLIC_KEY` from `/api/vapid-public`
