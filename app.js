@@ -446,6 +446,23 @@ function h(tag, attrs, ...children) {
   return node;
 }
 
+// SVG element builder (uses the SVG namespace so attrs like viewBox work).
+function svgEl(tag, attrs, ...children) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  if (attrs) {
+    for (const [k, v] of Object.entries(attrs)) {
+      if (v == null || v === false) continue;
+      el.setAttribute(k, String(v));
+    }
+  }
+  for (const c of children.flat(Infinity)) {
+    if (c == null || c === false) continue;
+    el.appendChild(typeof c === 'string' || typeof c === 'number'
+      ? document.createTextNode(String(c)) : c);
+  }
+  return el;
+}
+
 let toastTimer = null;
 function toast(message, ms = 2000) {
   let el = qs('#toast');
@@ -1363,13 +1380,384 @@ function deleteCountdownConfirm(id) {
   toast('Deleted');
 }
 
-// ---- Reports (stub; filled in Block 11) -------------------------------------
+// ---- Reports tab ------------------------------------------------------------
+
+let reportsSubTab = 'overview';   // 'overview' | 'mood' | 'sleep' | 'habits'
+let reportsRange  = 'week';       // 'week' | 'month'
+
+function rangeDayCount(range) {
+  return range === 'month' ? 30 : 7;
+}
+
+function rangeDayKeys(range) {
+  const n = rangeDayCount(range);
+  const today = currentDayKey();
+  const keys = [];
+  for (let i = n - 1; i >= 0; i--) keys.push(daysAgo(today, i));
+  return keys;
+}
+
+function rangeLabels(range) {
+  const days = rangeDayKeys(range);
+  return days.map((key, i) => {
+    const d = parseDayKey(key);
+    if (range === 'week') {
+      return d.toLocaleDateString(undefined, { weekday: 'narrow' });
+    }
+    // month: first, every 5th, and last index get a day-number label; others blank
+    const n = days.length;
+    const showIdx = new Set([0, Math.floor(n / 4), Math.floor(n / 2), Math.floor(3 * n / 4), n - 1]);
+    return showIdx.has(i) ? d.toLocaleDateString(undefined, { day: 'numeric' }) : '';
+  });
+}
+
+function moodSeries(range) {
+  return rangeDayKeys(range).map((key) => state.logs[key]?.mood ?? null);
+}
+
+function sleepQualitySeries(range) {
+  return rangeDayKeys(range).map((key) => state.logs[key]?.sleep?.quality ?? null);
+}
+
+function sleepHoursSeries(range) {
+  return rangeDayKeys(range).map((key) => state.logs[key]?.sleep?.hours ?? null);
+}
+
+function completionSeries(range) {
+  const active = state.habits.filter((x) => !x.archivedAt);
+  return rangeDayKeys(range).map((key) => {
+    if (active.length === 0) return null;
+    const done = active.filter((ht) => isHabitDoneForDay(ht, key)).length;
+    return Math.round((done / active.length) * 100);
+  });
+}
+
+function hasAnyValue(arr) {
+  return arr.some((v) => v != null);
+}
+
+// series: [{ values, color, dashed? }]
+// yAxis:  { min, max, ticks? }
+function svgLineChart({ series, labels, yAxis, height = 180 }) {
+  const width = 340;
+  const pad = { top: 14, right: 12, bottom: 22, left: 28 };
+  const plotW = width - pad.left - pad.right;
+  const plotH = height - pad.top - pad.bottom;
+  const n = labels.length;
+  const xs = (i) => pad.left + (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+  const ys = (v) => pad.top + plotH - ((v - yAxis.min) / (yAxis.max - yAxis.min)) * plotH;
+
+  const svg = svgEl('svg', {
+    viewBox: `0 0 ${width} ${height}`,
+    width: '100%', height,
+    class: 'chart', role: 'img',
+    preserveAspectRatio: 'none',
+  });
+
+  // Y grid + labels
+  const ticks = yAxis.ticks || [yAxis.min, (yAxis.min + yAxis.max) / 2, yAxis.max];
+  for (const t of ticks) {
+    const y = ys(t);
+    svg.appendChild(svgEl('line', {
+      x1: pad.left, x2: width - pad.right, y1: y, y2: y,
+      stroke: 'var(--border)', 'stroke-width': 1,
+    }));
+    svg.appendChild(svgEl('text', {
+      x: pad.left - 6, y: y + 3,
+      'text-anchor': 'end',
+      fill: 'var(--muted)',
+      'font-size': 10,
+    }, String(t)));
+  }
+
+  // X labels
+  for (let i = 0; i < n; i++) {
+    if (!labels[i]) continue;
+    svg.appendChild(svgEl('text', {
+      x: xs(i), y: height - 6,
+      'text-anchor': 'middle',
+      fill: 'var(--muted)',
+      'font-size': 9,
+    }, labels[i]));
+  }
+
+  // Series
+  for (const s of series) {
+    const color = s.color || 'var(--accent)';
+    const segments = [];
+    let seg = [];
+    s.values.forEach((v, i) => {
+      if (v == null) {
+        if (seg.length) segments.push(seg);
+        seg = [];
+      } else {
+        seg.push({ x: xs(i), y: ys(v) });
+      }
+    });
+    if (seg.length) segments.push(seg);
+
+    for (const part of segments) {
+      if (part.length >= 2) {
+        const d = part.map((p, i) =>
+          `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
+        const path = svgEl('path', {
+          d, stroke: color, 'stroke-width': 2, fill: 'none',
+          'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+        });
+        if (s.dashed) path.setAttribute('stroke-dasharray', '4 4');
+        svg.appendChild(path);
+      }
+      if (!s.dashed) {
+        for (const p of part) {
+          svg.appendChild(svgEl('circle', {
+            cx: p.x, cy: p.y, r: 3, fill: color,
+          }));
+        }
+      }
+    }
+  }
+
+  return svg;
+}
+
+function chartCard(chart) {
+  return h('div', {
+    class: 'prompt-card',
+    style: { padding: '10px', overflowX: 'auto' },
+  }, chart);
+}
+
+function legendItem(color, label) {
+  return h('span', { class: 'small', style: { display: 'inline-flex', alignItems: 'center', gap: '4px' } },
+    h('span', { style: { color } }, '●'), label);
+}
 
 function renderReports() {
-  return h('div', { class: 'view' },
-    h('h1', 'Reports'),
-    h('p', { class: 'muted' }, 'Charts for mood, sleep, and habits over time.'),
+  const view = h('div', { class: 'view' });
+  view.appendChild(h('h1', { style: { marginBottom: '8px' } }, 'Reports'));
+
+  const tabs = h('div', { class: 'segmented', style: { marginBottom: '10px' } });
+  for (const { id, label } of [
+    { id: 'overview', label: 'Overview' },
+    { id: 'mood',     label: 'Mood'     },
+    { id: 'sleep',    label: 'Sleep'    },
+    { id: 'habits',   label: 'Habits'   },
+  ]) {
+    tabs.appendChild(h('button', {
+      class: reportsSubTab === id ? 'on' : '',
+      onClick: () => { reportsSubTab = id; render(); },
+      type: 'button',
+    }, label));
+  }
+  view.appendChild(tabs);
+
+  const range = h('div', {
+    class: 'segmented',
+    style: { marginBottom: '14px', maxWidth: '220px', marginLeft: 'auto' },
+  });
+  for (const { id, label } of [
+    { id: 'week',  label: 'Week'  },
+    { id: 'month', label: 'Month' },
+  ]) {
+    range.appendChild(h('button', {
+      class: reportsRange === id ? 'on' : '',
+      onClick: () => { reportsRange = id; render(); },
+      type: 'button',
+    }, label));
+  }
+  view.appendChild(range);
+
+  if (reportsSubTab === 'mood')    view.appendChild(renderReportsMood());
+  else if (reportsSubTab === 'sleep')  view.appendChild(renderReportsSleep());
+  else if (reportsSubTab === 'habits') view.appendChild(renderReportsHabits());
+  else view.appendChild(renderReportsOverview());
+
+  return view;
+}
+
+function renderReportsOverview() {
+  const wrap = h('div');
+  const labels = rangeLabels(reportsRange);
+  const moodVals  = moodSeries(reportsRange).map((v) => v == null ? null : v * 20);
+  const sleepVals = sleepQualitySeries(reportsRange).map((v) => v == null ? null : v * 20);
+  const compVals  = completionSeries(reportsRange);
+
+  if (!hasAnyValue(moodVals) && !hasAnyValue(sleepVals) && !hasAnyValue(compVals)) {
+    wrap.appendChild(h('p', { class: 'small muted' },
+      'No data for this range yet — check in a few days to see trends.'));
+    return wrap;
+  }
+
+  wrap.appendChild(h('div', {
+    class: 'row', style: { gap: '14px', flexWrap: 'wrap', marginBottom: '8px' },
+  },
+    legendItem('#7c9cff', 'Mood'),
+    legendItem('#c084fc', 'Sleep'),
+    legendItem('#86efac', 'Completion'),
+  ));
+
+  wrap.appendChild(chartCard(svgLineChart({
+    series: [
+      { values: moodVals,  color: '#7c9cff' },
+      { values: sleepVals, color: '#c084fc' },
+      { values: compVals,  color: '#86efac' },
+    ],
+    labels,
+    yAxis: { min: 0, max: 100, ticks: [0, 50, 100] },
+    height: 200,
+  })));
+
+  wrap.appendChild(h('p', { class: 'small muted', style: { marginTop: '6px' } },
+    'Mood and sleep scaled to 0–100 for comparison. Completion is the % of active habits you hit that day.'));
+
+  return wrap;
+}
+
+function renderReportsMood() {
+  const wrap = h('div');
+  const labels = rangeLabels(reportsRange);
+  const values = moodSeries(reportsRange);
+  const valid = values.filter((v) => v != null);
+
+  wrap.appendChild(renderStatsPills('mood', valid, values.length));
+
+  if (valid.length === 0) {
+    wrap.appendChild(h('p', { class: 'small muted' },
+      'No mood logs in this range yet.'));
+    return wrap;
+  }
+
+  wrap.appendChild(chartCard(svgLineChart({
+    series: [{ values, color: '#7c9cff' }],
+    labels,
+    yAxis: { min: 1, max: 5, ticks: [1, 3, 5] },
+    height: 180,
+  })));
+  return wrap;
+}
+
+function renderReportsSleep() {
+  const wrap = h('div');
+  const labels = rangeLabels(reportsRange);
+  const quality = sleepQualitySeries(reportsRange);
+  const hours = sleepHoursSeries(reportsRange);
+  const validQ = quality.filter((v) => v != null);
+
+  wrap.appendChild(renderStatsPills('sleep', validQ, quality.length));
+
+  if (validQ.length === 0) {
+    wrap.appendChild(h('p', { class: 'small muted' },
+      'No sleep logs in this range yet.'));
+    return wrap;
+  }
+
+  wrap.appendChild(h('div', { class: 'small muted', style: { margin: '0 0 4px' } },
+    'Quality (1–5)'));
+  wrap.appendChild(chartCard(svgLineChart({
+    series: [{ values: quality, color: '#c084fc' }],
+    labels,
+    yAxis: { min: 1, max: 5, ticks: [1, 3, 5] },
+    height: 160,
+  })));
+
+  if (hasAnyValue(hours)) {
+    const maxH = Math.max(10, Math.ceil(Math.max(...hours.filter((v) => v != null))));
+    wrap.appendChild(h('div', { class: 'small muted', style: { margin: '14px 0 4px' } },
+      'Hours'));
+    wrap.appendChild(chartCard(svgLineChart({
+      series: [{ values: hours, color: '#60a5fa' }],
+      labels,
+      yAxis: { min: 0, max: maxH, ticks: [0, Math.floor(maxH / 2), maxH] },
+      height: 160,
+    })));
+  }
+  return wrap;
+}
+
+function renderStatsPills(kind, valid, total) {
+  const pills = h('div', {
+    class: 'row', style: { gap: '6px', flexWrap: 'wrap', marginBottom: '10px' },
+  });
+  if (valid.length === 0) {
+    pills.appendChild(h('span', { class: 'pill' }, 'No data yet'));
+    return pills;
+  }
+  const avg = (valid.reduce((a, b) => a + b, 0) / valid.length).toFixed(1);
+  const hi  = Math.max(...valid);
+  const lo  = Math.min(...valid);
+  const bank = kind === 'mood' ? MOOD_OPTIONS : SLEEP_FACES;
+  const faceOf = (v) => bank.find((m) => m.value === v)?.emoji || '';
+  pills.appendChild(h('span', { class: 'pill' }, `avg ${avg}`));
+  pills.appendChild(h('span', { class: 'pill' }, `best ${faceOf(hi)}`));
+  pills.appendChild(h('span', { class: 'pill' }, `low ${faceOf(lo)}`));
+  pills.appendChild(h('span', { class: 'pill' }, `${valid.length}/${total} days`));
+  return pills;
+}
+
+function renderReportsHabits() {
+  const wrap = h('div');
+  const active = state.habits.filter((x) => !x.archivedAt);
+
+  if (active.length === 0) {
+    wrap.appendChild(h('p', { class: 'small muted' },
+      'No habits to chart. Add a few in the Habits tab.'));
+    return wrap;
+  }
+
+  for (const habit of active) wrap.appendChild(renderHabitReportCard(habit));
+  return wrap;
+}
+
+function renderHabitReportCard(habit) {
+  const card = h('article', {
+    class: 'prompt-card',
+    style: { marginBottom: '10px' },
+  });
+
+  card.appendChild(h('div', {
+    class: 'row between', style: { marginBottom: '8px', alignItems: 'flex-start' },
+  },
+    h('div', null,
+      h('div', { class: 'kicker' }, habit.kind === 'good' ? 'Build' : 'Break'),
+      h('div', { class: 'c-title' }, habit.title),
+      h('div', { class: 'small muted' }, habitMeta(habit)),
+    ),
+    currentStreak(habit) > 0
+      ? h('span', { class: 'streak' },
+          `🔥 ${currentStreak(habit)}-day ${habit.kind === 'good' ? 'streak' : 'clean'}`)
+      : null,
+  ));
+
+  if (habit.type === 'tick') {
+    card.appendChild(renderHeatmap(habit));
+    return card;
+  }
+
+  const labels = rangeLabels(reportsRange);
+  const days = rangeDayKeys(reportsRange);
+  const values = days.map((key) => {
+    const v = state.logs[key]?.habits?.[habit.id];
+    return v == null ? null : Number(v);
+  });
+  const maxValRaw = Math.max(
+    habit.target,
+    ...values.filter((v) => v != null),
   );
+  const yMax = habit.type === 'percent'
+    ? 100
+    : Math.max(Math.ceil(maxValRaw * 1.1), habit.target);
+  const target = new Array(days.length).fill(habit.target);
+
+  card.appendChild(chartCard(svgLineChart({
+    series: [
+      { values: target, color: 'var(--muted)', dashed: true },
+      { values,         color: habit.color },
+    ],
+    labels,
+    yAxis: { min: 0, max: yMax, ticks: [0, Math.round(yMax / 2), yMax] },
+    height: 140,
+  })));
+  return card;
 }
 
 // ---- Settings ---------------------------------------------------------------

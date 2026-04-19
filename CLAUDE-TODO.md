@@ -129,13 +129,13 @@ state.countdowns = [
 - [x] 10e. Today-view peek: top upcoming countdown strip above habits
 
 ## Block 11 — Reports tab
-- [ ] 11a. `renderReports` + sub-tab nav (Overview / Mood / Sleep / Habits)
-- [ ] 11b. Week / Month toggle (state scoped to Reports)
-- [ ] 11c. SVG line-chart helper (axes, dots, line, week/month x-labels, 1–5 y-scale)
-- [ ] 11d. Overview: mood + sleep + completion-rate lines on one chart
-- [ ] 11e. Mood sub-tab: dedicated chart + min/avg/max pills
-- [ ] 11f. Sleep sub-tab: dedicated chart (quality + hours overlay if hours logged)
-- [ ] 11g. Habits sub-tab: per-habit view (reuse heatmap for tick, line for count/percent with target line)
+- [x] 11a. `renderReports` + sub-tab nav (Overview / Mood / Sleep / Habits)
+- [x] 11b. Week / Month toggle (state scoped to Reports)
+- [x] 11c. SVG line-chart helper (axes, dots, line, week/month x-labels, 1–5 y-scale)
+- [x] 11d. Overview: mood + sleep + completion-rate lines on one chart
+- [x] 11e. Mood sub-tab: dedicated chart + min/avg/max pills
+- [x] 11f. Sleep sub-tab: dedicated chart (quality + hours overlay if hours logged)
+- [x] 11g. Habits sub-tab: per-habit view (reuse heatmap for tick, line for count/percent with target line)
 
 ## Block 12 — Polish
 - [ ] 12a. Gear icon a11y + focus-visible
