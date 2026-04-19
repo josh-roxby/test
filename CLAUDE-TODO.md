@@ -22,7 +22,7 @@ Working task list for the Tempo habit + mood PWA, broken into small chunks so ea
 ---
 
 ## Block 1 — Skeleton + PWA shell
-- [ ] 1a. `app.js`: storage layer (`load` / `save`, default state, `STORAGE_KEY`)
+- [x] 1a. `app.js`: storage layer (`load` / `save`, default state, `STORAGE_KEY`)
 - [ ] 1b. `app.js`: day helpers (`currentDayKey` with 3am rollover, `daysAgo`, `strHash`)
 - [ ] 1c. `app.js`: DOM helper `h()` + `toast()` + `qs()`
 - [ ] 1d. `app.js`: router (`route` state, `go()`, `render()`, tabbar wiring, empty view stubs)
