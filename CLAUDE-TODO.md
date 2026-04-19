@@ -197,6 +197,24 @@ state.countdowns = [
 
 ---
 
+# Phase 5 (first pass) — Theme + time-of-day buckets
+
+**Branch:** `feat/theme-and-buckets`
+
+- [x] Light/Dark/System theme toggle in Settings
+- [x] CSS variable overrides for light theme (`[data-theme="light"]`)
+- [x] Theme-color meta kept in sync with resolved theme
+- [x] `matchMedia('prefers-color-scheme')` listener for live "System" switching
+- [x] `REMINDER_BUCKETS` (morning / noon / afternoon / evening / night, ending at 10pm)
+- [x] Server: `reminderBucketDue` using deterministic random offset per user per day
+- [x] Server: `/api/subscribe` accepts `bucket` (or legacy `reminderTime`)
+- [x] Server: `/api/tick` prefers bucket logic, falls back to legacy HH:MM
+- [x] Client: bucket card picker replaces time input
+- [x] Client: `subscribeToPush(bucket, tz)` sends bucket to backend
+- [x] Back-compat: legacy subs keep working; new subs save bucket
+
+---
+
 # Phase 3 — Home refinement, At a glance, Fast wins
 
 **Branch:** `feat/phase-3-build`

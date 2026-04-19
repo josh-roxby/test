@@ -151,3 +151,33 @@ export function withinMinutes(nowHM, targetHM, window) {
   if (diff > 720) diff = 1440 - diff; // wrap around midnight
   return diff <= window;
 }
+
+// Time-of-day buckets. Client picks one of these keys; server picks a
+// deterministic random minute within the range per user per day.
+export const REMINDER_BUCKETS = {
+  morning:   { label: 'Morning',   hint: '7 – 10 AM',     startHour: 7,  endHour: 10 },
+  noon:      { label: 'Noon',      hint: '10 AM – 12 PM', startHour: 10, endHour: 12 },
+  afternoon: { label: 'Afternoon', hint: '12 – 4 PM',     startHour: 12, endHour: 16 },
+  evening:   { label: 'Evening',   hint: '4 – 7 PM',      startHour: 16, endHour: 19 },
+  night:     { label: 'Night',     hint: '7 – 10 PM',     startHour: 19, endHour: 22 },
+};
+
+function bucketRandomOffset(seed, rangeMins) {
+  let h = 5381;
+  for (let i = 0; i < seed.length; i++) h = ((h << 5) + h + seed.charCodeAt(i)) | 0;
+  return Math.abs(h) % rangeMins;
+}
+
+// True once the user's local time has passed their deterministic random minute
+// within the bucket. Falls back to false if the bucket is unknown / out of range.
+export function reminderBucketDue(sub, local) {
+  const bucket = REMINDER_BUCKETS[sub.bucket];
+  if (!bucket) return false;
+  const [nh, nm] = local.hm.split(':').map(Number);
+  const nowMins = nh * 60 + nm;
+  const startMins = bucket.startHour * 60;
+  const endMins = bucket.endHour * 60;
+  if (nowMins < startMins || nowMins >= endMins) return false;
+  const offset = bucketRandomOffset(sub.endpoint + local.ymd, endMins - startMins);
+  return nowMins >= startMins + offset;
+}
