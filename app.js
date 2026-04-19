@@ -603,40 +603,36 @@ function renderHome() {
     const moodFace = MOOD_OPTIONS.find((m) => m.value === log.mood);
     const sleepFace = log.sleep?.quality
       ? SLEEP_FACES.find((s) => s.value === log.sleep.quality) : null;
-    const row = h('div', { class: 'row', style: { gap: '16px' } });
+    const summary = h('div', {
+      class: 'row between',
+      style: {
+        marginBottom: '16px',
+        padding: '10px 14px',
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
+        borderRadius: '999px',
+        alignItems: 'center',
+      },
+    });
+    const inner = h('div', { class: 'row', style: { gap: '10px', fontSize: '0.95rem' } });
     if (sleepFace) {
-      row.appendChild(h('div', null,
-        h('div', { class: 'small muted' }, 'slept'),
-        h('div', { style: { fontSize: '1.2rem', marginTop: '2px' } },
-          `${sleepFace.emoji} ${sleepFace.caption}`),
-      ));
+      inner.appendChild(h('span', null, `😴 ${sleepFace.caption}`));
+      inner.appendChild(h('span', { class: 'muted small' }, '·'));
     }
     if (moodFace) {
-      row.appendChild(h('div', null,
-        h('div', { class: 'small muted' }, 'mood'),
-        h('div', { style: { fontSize: '1.2rem', marginTop: '2px' } },
-          `${moodFace.emoji} ${moodFace.caption}`),
-      ));
+      inner.appendChild(h('span', null, `${moodFace.emoji} ${moodFace.caption}`));
     }
-    view.appendChild(h('div', { class: 'summary', style: { marginBottom: '16px' } },
-      h('div', { class: 'row between', style: { alignItems: 'flex-start' } },
-        row,
-        h('button', {
-          class: 'ghost small',
-          onClick: () => openCheckIn(0),
-        }, 'Edit'),
-      ),
-    ));
+    summary.appendChild(inner);
+    summary.appendChild(h('button', {
+      class: 'ghost small',
+      style: { minHeight: '32px', padding: '4px 10px' },
+      onClick: () => openCheckIn(0),
+    }, 'Edit'));
+    view.appendChild(summary);
   }
 
-  // Next upcoming countdown (peek strip)
-  const nextCountdown = sortedUpcomingCountdowns()[0];
-  if (nextCountdown) {
-    view.appendChild(renderCountdownTile(nextCountdown, {
-      style: { marginBottom: '16px', minHeight: '90px' },
-      onClick: () => go('countdowns'),
-    }));
-  }
+  // 2×2 glanceable tile grid (Diary · Habits · Countdowns · Reports)
+  view.appendChild(renderGlancableTiles());
 
   const active = state.habits.filter((x) => !x.archivedAt);
 
@@ -660,6 +656,9 @@ function renderHome() {
   if (good.length) view.appendChild(renderHomeSection('Build', 'good', good));
   if (bad.length)  view.appendChild(renderHomeSection('Break', 'bad', bad));
 
+  // Rotating stats card (at the bottom)
+  view.appendChild(renderHomeStatsCard());
+
   return view;
 }
 
@@ -672,6 +671,180 @@ function renderHomeSection(title, kindClass, habits) {
     h('div', { class: 'habit-list' },
       habits.map((habit) => renderHomeHabitCard(habit)),
     ),
+  );
+}
+
+// ---- Stats helpers ----------------------------------------------------------
+
+function totalDaysOnTempo() {
+  const keys = Object.keys(state.logs);
+  if (keys.length === 0) return 0;
+  const earliest = keys.sort()[0];
+  const earliestDate = parseDayKey(earliest);
+  const today = parseDayKey(currentDayKey());
+  const diff = Math.floor((today - earliestDate) / (24 * 3600 * 1000)) + 1;
+  return Math.max(1, diff);
+}
+
+function totalCheckIns() {
+  return Object.values(state.logs).filter((log) => log?.completedAt).length;
+}
+
+function totalDiaryEntries() {
+  return Object.values(state.logs)
+    .filter((log) => log?.diary && (log.diary.good || log.diary.challenge))
+    .length;
+}
+
+function bestStreakAllTime() {
+  const active = state.habits.filter((x) => !x.archivedAt);
+  if (active.length === 0) return 0;
+  return Math.max(0, ...active.map((h) => longestStreak(h)));
+}
+
+// ---- Home: glanceable tiles + stats card ------------------------------------
+
+function renderGlancableTiles() {
+  const grid = h('div', { class: 'tile-grid' });
+
+  // Diary
+  const todayKey = currentDayKey();
+  const todayLog = state.logs[todayKey];
+  const todayDiary = todayLog?.diary;
+  const hasToday = todayDiary && (todayDiary.good || todayDiary.challenge);
+
+  let diaryPreview;
+  if (hasToday) {
+    const snippet = (todayDiary.good || todayDiary.challenge).slice(0, 48);
+    diaryPreview = h('div', { class: 'tile-sub' }, snippet + (snippet.length >= 48 ? '…' : ''));
+  } else {
+    diaryPreview = h('div', { class: 'tile-sub' }, 'Write today\'s entry');
+  }
+  grid.appendChild(tile('📖 Diary', hasToday ? 'Today' : 'Open', diaryPreview, () => go('diary')));
+
+  // Habits
+  const activeHabits = state.habits.filter((x) => !x.archivedAt);
+  const doneHabits = activeHabits.filter((ht) => isHabitDoneForDay(ht, todayKey)).length;
+  let habitsPreview;
+  if (activeHabits.length === 0) {
+    habitsPreview = h('div', { class: 'tile-sub' }, 'Add your first');
+  } else {
+    const pct = Math.round((doneHabits / activeHabits.length) * 100);
+    habitsPreview = h('div', { class: 'tile-progress' },
+      h('div', {
+        class: 'tile-progress-fill',
+        style: { width: `${pct}%` },
+      }),
+    );
+  }
+  const habitsValue = activeHabits.length === 0
+    ? 'No habits'
+    : `${doneHabits}/${activeHabits.length} done`;
+  grid.appendChild(tile('✓ Habits', habitsValue, habitsPreview, () => go('habits')));
+
+  // Countdowns
+  const nextCountdown = sortedUpcomingCountdowns()[0];
+  let countdownsValue, countdownsPreview, countdownsTheme;
+  if (nextCountdown) {
+    countdownsValue = nextCountdown.title;
+    countdownsPreview = h('div', { class: 'tile-sub' }, formatCountdownRemaining(nextCountdown));
+    countdownsTheme = nextCountdown.theme || null;
+  } else {
+    countdownsValue = 'None yet';
+    countdownsPreview = h('div', { class: 'tile-sub' }, 'Add an event');
+  }
+  grid.appendChild(tile('⏳ Soon', countdownsValue, countdownsPreview, () => go('countdowns'), countdownsTheme));
+
+  // Reports
+  const spark = renderMoodSparkline();
+  const reportsValue = spark ? 'Mood · 7d' : 'Keep logging';
+  const reportsPreview = spark || h('div', { class: 'tile-sub' }, 'Need more data');
+  grid.appendChild(tile('📊 Reports', reportsValue, reportsPreview, () => go('reports')));
+
+  return grid;
+}
+
+function tile(label, value, preview, onClick, theme = null) {
+  return h('button', {
+    class: 'tile' + (theme ? ` theme-${theme}` : ''),
+    type: 'button',
+    onClick,
+  },
+    h('div', { class: 'tile-label' }, label),
+    h('div', { class: 'tile-value' }, value),
+    preview,
+  );
+}
+
+function renderMoodSparkline() {
+  const values = moodSeries('week');
+  const valid = values.filter((v) => v != null);
+  if (valid.length < 2) return null;
+
+  const width = 100, height = 36;
+  const min = 1, max = 5;
+  const n = values.length;
+  const xs = (i) => (n === 1 ? width / 2 : (i / (n - 1)) * width);
+  const ys = (v) => height - 3 - ((v - min) / (max - min)) * (height - 6);
+
+  const svg = svgEl('svg', {
+    viewBox: `0 0 ${width} ${height}`,
+    width: '100%', height,
+    preserveAspectRatio: 'none',
+    'aria-label': 'Mood sparkline',
+  });
+
+  const segs = [];
+  let seg = [];
+  values.forEach((v, i) => {
+    if (v == null) {
+      if (seg.length) segs.push(seg);
+      seg = [];
+    } else {
+      seg.push({ x: xs(i), y: ys(v) });
+    }
+  });
+  if (seg.length) segs.push(seg);
+
+  for (const s of segs) {
+    if (s.length >= 2) {
+      const d = s.map((p, i) =>
+        `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
+      svg.appendChild(svgEl('path', {
+        d,
+        stroke: '#7c9cff', 'stroke-width': 2, fill: 'none',
+        'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+      }));
+    }
+  }
+  // Last-point dot for current mood.
+  const last = values.slice().reverse().find((v) => v != null);
+  if (last != null) {
+    const lastIdx = values.lastIndexOf(last);
+    svg.appendChild(svgEl('circle', {
+      cx: xs(lastIdx), cy: ys(last), r: 2.5, fill: '#7c9cff',
+    }));
+  }
+  return svg;
+}
+
+function renderHomeStatsCard() {
+  const d = totalDaysOnTempo();
+  const c = totalCheckIns();
+  const e = totalDiaryEntries();
+  const b = bestStreakAllTime();
+
+  if (d === 0 && c === 0 && e === 0) return h('span'); // nothing to show
+
+  const stats = [];
+  if (d > 0) stats.push(`🗓 ${d} day${d === 1 ? '' : 's'} on Tempo`);
+  if (b > 0) stats.push(`🔥 ${b}-day best streak`);
+  if (e > 0) stats.push(`📖 ${e} entr${e === 1 ? 'y' : 'ies'}`);
+  if (c > 0 && stats.length < 2) stats.push(`🌱 ${c} check-in${c === 1 ? '' : 's'}`);
+
+  return h('div', { class: 'home-stats' },
+    stats.map((s, i) =>
+      h('span', null, s + (i < stats.length - 1 ? '  ·  ' : ''))),
   );
 }
 

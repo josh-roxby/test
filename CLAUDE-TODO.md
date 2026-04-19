@@ -217,14 +217,14 @@ state.countdowns = [
 - [x] 13e. Back button returns to home
 
 ## Block 14 — Home stats card + 2×2 glanceable tiles
-- [ ] 14a. Stats helpers (totalDaysOnTempo, totalCheckIns, totalDiaryEntries, bestStreakAllTime)
-- [ ] 14b. Rotating stats card copy
-- [ ] 14c. Diary preview tile (last good snippet or CTA)
-- [ ] 14d. Habits preview tile (X of Y done + progress)
-- [ ] 14e. Countdowns preview tile (next event)
-- [ ] 14f. Reports preview tile (7-day mood sparkline)
-- [ ] 14g. 2×2 grid CSS + narrow fallback
-- [ ] 14h. Tighten check-in status card
+- [x] 14a. Stats helpers (totalDaysOnTempo, totalCheckIns, totalDiaryEntries, bestStreakAllTime)
+- [x] 14b. Rotating stats card copy
+- [x] 14c. Diary preview tile (last good snippet or CTA)
+- [x] 14d. Habits preview tile (X of Y done + progress)
+- [x] 14e. Countdowns preview tile (next event)
+- [x] 14f. Reports preview tile (7-day mood sparkline)
+- [x] 14g. 2×2 grid CSS + narrow fallback
+- [x] 14h. Tighten check-in status card
 
 ## Block 15 — "At a glance" (Wrapped-style) modal
 - [ ] 15a. Aggregators (peak mood day, hardest day, best sleep, top habit, longest streak, diary moment)
