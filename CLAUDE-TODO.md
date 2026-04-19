@@ -105,11 +105,11 @@ state.countdowns = [
 - [x] 6d. Update `ROUTES`, `go()`, `render()` for new routes; move Settings out of tabbar; gear icon handler opens Settings route
 
 ## Block 7 — Check-in: Sleep + Diary steps
-- [ ] 7a. Sleep step: 5-face quality picker + optional hours input
-- [ ] 7b. Diary step: two textareas with live 140-char counters
-- [ ] 7c. Extend `nextIncompleteStep` + progress bar (6 dashes)
-- [ ] 7d. Re-order flow to Sleep → Mood → Prompt → Habits → Diary → Summary
-- [ ] 7e. Extend summary screen to surface sleep quality + diary snippets
+- [x] 7a. Sleep step: 5-face quality picker + optional hours input
+- [x] 7b. Diary step: two textareas with live 140-char counters
+- [x] 7c. Extend `nextIncompleteStep` + progress bar (6 dashes)
+- [x] 7d. Re-order flow to Sleep → Mood → Prompt → Habits → Diary → Summary
+- [x] 7e. Extend summary screen to surface sleep quality + diary snippets
 
 ## Block 8 — Diary tab
 - [ ] 8a. `renderDiary` route + list header

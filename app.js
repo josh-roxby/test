@@ -66,6 +66,19 @@ const MOOD_OPTIONS = [
   { value: 5, emoji: '😄', caption: 'great' },
 ];
 
+const SLEEP_FACES = [
+  { value: 1, emoji: '😩', caption: 'awful' },
+  { value: 2, emoji: '😕', caption: 'poor'  },
+  { value: 3, emoji: '😐', caption: 'okay'  },
+  { value: 4, emoji: '🙂', caption: 'good'  },
+  { value: 5, emoji: '😴', caption: 'great' },
+];
+
+const DIARY_CAP = 140;
+
+const CHECKIN_STEPS = ['sleep', 'mood', 'prompt', 'habits', 'diary'];
+// + an implicit 'summary' step after all of the above.
+
 const FACTS = [
   'Honey never spoils — archaeologists have found edible pots 3,000 years old.',
   'A day on Venus is longer than its year.',
@@ -214,9 +227,9 @@ function ensureTodayLog() {
 function nextIncompleteStep() {
   const log = state.logs[currentDayKey()];
   if (!log) return 0;
-  if (!log.steps?.mood) return 0;
-  if (!log.steps?.prompt) return 1;
-  if (!log.steps?.habits) return 2;
+  for (let i = 0; i < CHECKIN_STEPS.length; i++) {
+    if (!log.steps?.[CHECKIN_STEPS[i]]) return i;
+  }
   return null;
 }
 
@@ -395,21 +408,36 @@ function renderHome() {
   // Check-in status card
   const incomplete = nextIncompleteStep();
   const log = state.logs[currentDayKey()];
+  const anyStepDone = !!log && Object.values(log.steps || {}).some(Boolean);
+
   if (incomplete !== null) {
     view.appendChild(h('button', {
       class: 'primary block',
       style: { marginBottom: '16px' },
       onClick: () => openCheckIn(),
-    }, log && log.steps?.mood ? 'Resume check-in' : 'Start today\'s check-in'));
+    }, anyStepDone ? 'Resume check-in' : 'Start today\'s check-in'));
   } else if (log) {
-    const face = MOOD_OPTIONS.find((m) => m.value === log.mood);
+    const moodFace = MOOD_OPTIONS.find((m) => m.value === log.mood);
+    const sleepFace = log.sleep?.quality
+      ? SLEEP_FACES.find((s) => s.value === log.sleep.quality) : null;
+    const row = h('div', { class: 'row', style: { gap: '16px' } });
+    if (sleepFace) {
+      row.appendChild(h('div', null,
+        h('div', { class: 'small muted' }, 'slept'),
+        h('div', { style: { fontSize: '1.2rem', marginTop: '2px' } },
+          `${sleepFace.emoji} ${sleepFace.caption}`),
+      ));
+    }
+    if (moodFace) {
+      row.appendChild(h('div', null,
+        h('div', { class: 'small muted' }, 'mood'),
+        h('div', { style: { fontSize: '1.2rem', marginTop: '2px' } },
+          `${moodFace.emoji} ${moodFace.caption}`),
+      ));
+    }
     view.appendChild(h('div', { class: 'summary', style: { marginBottom: '16px' } },
-      h('div', { class: 'row between' },
-        h('div', null,
-          h('div', { class: 'small muted' }, 'Checked in'),
-          h('div', { style: { fontSize: '1.2rem', marginTop: '2px' } },
-            `${face?.emoji || '✨'} ${face?.caption || ''}`),
-        ),
+      h('div', { class: 'row between', style: { alignItems: 'flex-start' } },
+        row,
         h('button', {
           class: 'ghost small',
           onClick: () => openCheckIn(0),
@@ -989,7 +1017,7 @@ function openCheckIn(startStep = null) {
   const log = state.logs[currentDayKey()];
   checkInHabitBuffer = { ...(log.habits || {}) };
   checkInOpen = true;
-  checkInStep = startStep ?? (nextIncompleteStep() ?? 3);
+  checkInStep = startStep ?? (nextIncompleteStep() ?? CHECKIN_STEPS.length);
   renderCheckIn();
 }
 
@@ -1011,25 +1039,30 @@ function maybeOpenCheckIn() {
 
 function nextStep() {
   const log = ensureTodayLog();
-  if (checkInStep === 0) {
+  const name = CHECKIN_STEPS[checkInStep];
+
+  if (name === 'sleep') {
+    // Any state (including untouched) is fine — sleep is skippable.
+    log.steps.sleep = true;
+  } else if (name === 'mood') {
     if (!log.mood) { toast('Pick a mood first'); return; }
     log.steps.mood = true;
-    save();
-    checkInStep = 1;
-  } else if (checkInStep === 1) {
+  } else if (name === 'prompt') {
     log.steps.prompt = true;
-    save();
-    checkInStep = 2;
-  } else if (checkInStep === 2) {
+  } else if (name === 'habits') {
     log.habits = { ...checkInHabitBuffer };
     log.steps.habits = true;
+  } else if (name === 'diary') {
+    log.steps.diary = true;
     log.completedAt = new Date().toISOString();
-    save();
-    checkInStep = 3;
-  } else if (checkInStep === 3) {
+  } else {
+    // At summary — "Done" button.
     closeCheckIn(false);
     return;
   }
+
+  save();
+  checkInStep++;
   renderCheckIn();
 }
 
@@ -1050,8 +1083,9 @@ function renderCheckIn() {
   }});
   const sheet = h('div', { class: 'sheet' });
 
+  const totalPips = CHECKIN_STEPS.length + 1; // + summary
   const progress = h('div', { class: 'progress' });
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < totalPips; i++) {
     progress.appendChild(h('span', { class: i <= checkInStep ? 'active' : '' }));
   }
 
@@ -1067,25 +1101,120 @@ function renderCheckIn() {
   ));
 
   const body = h('div', { class: 'body' });
-  if (checkInStep === 0) body.appendChild(renderMoodStep());
-  else if (checkInStep === 1) body.appendChild(renderPromptStep());
-  else if (checkInStep === 2) body.appendChild(renderHabitsStep());
+  const name = CHECKIN_STEPS[checkInStep];
+  if (name === 'sleep') body.appendChild(renderSleepStep());
+  else if (name === 'mood') body.appendChild(renderMoodStep());
+  else if (name === 'prompt') body.appendChild(renderPromptStep());
+  else if (name === 'habits') body.appendChild(renderHabitsStep());
+  else if (name === 'diary') body.appendChild(renderDiaryStep());
   else body.appendChild(renderSummaryStep());
   sheet.appendChild(body);
 
+  const atSummary = checkInStep >= CHECKIN_STEPS.length;
+  const atLastInput = checkInStep === CHECKIN_STEPS.length - 1;
+
   const footer = h('footer');
-  if (checkInStep > 0 && checkInStep < 3) {
+  if (checkInStep > 0 && !atSummary) {
     footer.appendChild(h('button', { class: 'ghost', onClick: prevStep }, 'Back'));
   }
   footer.appendChild(h('span', { class: 'grow' }));
-  const nextLabel =
-    checkInStep === 2 ? 'Finish' :
-    checkInStep === 3 ? 'Done' : 'Next';
+  const nextLabel = atSummary ? 'Done' : atLastInput ? 'Finish' : 'Next';
   footer.appendChild(h('button', { class: 'primary', onClick: nextStep }, nextLabel));
   sheet.appendChild(footer);
 
   scrim.appendChild(sheet);
   document.body.appendChild(scrim);
+}
+
+function renderSleepStep() {
+  const log = ensureTodayLog();
+  if (!log.sleep) log.sleep = { quality: null, hours: null };
+
+  const wrap = h('div', { class: 'step' });
+  wrap.appendChild(h('h2', { style: { color: 'var(--text)', fontSize: '1.25rem', margin: '4px 0 4px' } },
+    'How did you sleep?'));
+  wrap.appendChild(h('p', { class: 'small muted', style: { marginBottom: '12px' } },
+    'Pick a face. Hours are optional — skip anything.'));
+
+  const grid = h('div', { class: 'mood-grid' });
+  SLEEP_FACES.forEach((opt) => {
+    grid.appendChild(h('button', {
+      class: 'mood-btn' + (log.sleep.quality === opt.value ? ' selected' : ''),
+      type: 'button',
+      'aria-label': `Sleep ${opt.caption}`,
+      onClick: () => {
+        log.sleep.quality = opt.value;
+        save();
+        renderCheckIn();
+      },
+    }, opt.emoji));
+  });
+  wrap.appendChild(grid);
+
+  const caption = log.sleep.quality
+    ? SLEEP_FACES.find((s) => s.value === log.sleep.quality).caption
+    : ' ';
+  wrap.appendChild(h('div', { class: 'mood-caption' }, caption));
+
+  wrap.appendChild(h('label', 'Hours (optional)'));
+  const hoursIn = h('input', {
+    type: 'number', min: 0, max: 24, step: 0.5,
+    inputmode: 'decimal', placeholder: 'e.g. 7.5',
+  });
+  hoursIn.value = log.sleep.hours ?? '';
+  hoursIn.addEventListener('input', () => {
+    const raw = hoursIn.value;
+    if (raw === '') {
+      log.sleep.hours = null;
+    } else {
+      const n = Number(raw);
+      log.sleep.hours = Number.isFinite(n) ? Math.min(24, Math.max(0, n)) : null;
+    }
+    save();
+  });
+  wrap.appendChild(hoursIn);
+
+  return wrap;
+}
+
+function renderDiaryStep() {
+  const log = ensureTodayLog();
+  if (!log.diary) log.diary = { good: '', challenge: '' };
+
+  const wrap = h('div', { class: 'step' });
+  wrap.appendChild(h('h2', { style: { color: 'var(--text)', fontSize: '1.25rem', margin: '4px 0 4px' } },
+    'One-sentence journal'));
+  wrap.appendChild(h('p', { class: 'small muted', style: { marginBottom: '12px' } },
+    `Optional. ${DIARY_CAP} chars each — keep it snappy.`));
+
+  wrap.appendChild(renderDiaryField(log.diary, 'good', 'One good thing', 'e.g. Coffee with Alex was lovely.'));
+  wrap.appendChild(renderDiaryField(log.diary, 'challenge', 'One challenge or learning', 'e.g. Struggled to focus after lunch.'));
+
+  return wrap;
+}
+
+function renderDiaryField(diary, key, label, placeholder) {
+  const wrap = h('div');
+  wrap.appendChild(h('label', label));
+  const ta = h('textarea', {
+    maxlength: DIARY_CAP, rows: 2, placeholder,
+    style: { minHeight: '64px' },
+  });
+  ta.value = diary[key] || '';
+  const counter = h('div', {
+    class: 'small muted',
+    style: { textAlign: 'right', marginTop: '2px' },
+  }, `${ta.value.length}/${DIARY_CAP}`);
+  ta.addEventListener('input', () => {
+    diary[key] = ta.value;
+    counter.textContent = `${ta.value.length}/${DIARY_CAP}`;
+    counter.style.color = ta.value.length >= DIARY_CAP
+      ? 'var(--bad)' : 'var(--muted)';
+    save();
+  });
+  wrap.appendChild(ta);
+  wrap.appendChild(counter);
+  return wrap;
 }
 
 function renderMoodStep() {
@@ -1227,19 +1356,54 @@ function renderHabitCheckRow(habit) {
 function renderSummaryStep() {
   const log = ensureTodayLog();
   const wrap = h('div', { class: 'step center' });
-  const face = log.mood ? MOOD_OPTIONS.find((m) => m.value === log.mood) : null;
+  const moodFace = log.mood ? MOOD_OPTIONS.find((m) => m.value === log.mood) : null;
+  const sleepFace = log.sleep?.quality
+    ? SLEEP_FACES.find((s) => s.value === log.sleep.quality) : null;
   const habitCount = Object.keys(log.habits || {}).length;
   const doneCount = state.habits.filter(
     (ht) => !ht.archivedAt && isHabitDoneForDay(ht, currentDayKey()),
   ).length;
 
+  const faces = h('div', {
+    class: 'row', style: { justifyContent: 'center', gap: '28px', alignItems: 'flex-start' },
+  });
+  if (sleepFace) {
+    faces.appendChild(h('div', { style: { textAlign: 'center' } },
+      h('div', { class: 'mood' }, sleepFace.emoji),
+      h('div', { class: 'small muted' }, `sleep · ${sleepFace.caption}`),
+    ));
+  }
+  if (moodFace) {
+    faces.appendChild(h('div', { style: { textAlign: 'center' } },
+      h('div', { class: 'mood' }, moodFace.emoji),
+      h('div', { class: 'small muted' }, `mood · ${moodFace.caption}`),
+    ));
+  }
+  if (!sleepFace && !moodFace) {
+    faces.appendChild(h('div', { class: 'mood' }, '✨'));
+  }
+
   wrap.appendChild(h('div', { class: 'summary' },
-    h('div', { class: 'mood' }, face ? face.emoji : '✨'),
-    h('div', { style: { marginTop: '4px', color: 'var(--text)' } },
-      face ? face.caption : 'logged'),
+    faces,
     h('p', { class: 'small muted', style: { marginTop: '12px', marginBottom: 0 } },
       `${habitCount} habit${habitCount === 1 ? '' : 's'} logged · ${doneCount} on track today.`),
   ));
+
+  if (log.diary && (log.diary.good || log.diary.challenge)) {
+    const card = h('div', {
+      class: 'prompt-card',
+      style: { marginTop: '12px', textAlign: 'left' },
+    });
+    if (log.diary.good) {
+      card.appendChild(h('p', { style: { margin: '0 0 6px', color: 'var(--text)', lineHeight: 1.45 } },
+        h('span', { class: 'kicker' }, 'Good'), ' ', log.diary.good));
+    }
+    if (log.diary.challenge) {
+      card.appendChild(h('p', { style: { margin: 0, color: 'var(--text)', lineHeight: 1.45 } },
+        h('span', { class: 'kicker' }, 'Challenge'), ' ', log.diary.challenge));
+    }
+    wrap.appendChild(card);
+  }
 
   wrap.appendChild(h('p', { style: { marginTop: '16px' } },
     'Nice — see you tomorrow.'));
