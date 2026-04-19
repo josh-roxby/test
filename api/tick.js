@@ -5,7 +5,7 @@
 // one today (per their local timezone).
 
 import webpush from 'web-push';
-import { kv, kvGetJson, kvSetJson, nowInTimezone, withinMinutes } from './_lib.js';
+import { kv, kvGetJson, kvSetJson, nowInTimezone, withinMinutes, vapidSubject } from './_lib.js';
 
 const WINDOW_MINUTES = 7;
 
@@ -21,7 +21,7 @@ export default async function handler(req, res) {
   }
 
   webpush.setVapidDetails(
-    process.env.VAPID_SUBJECT,
+    vapidSubject(),
     process.env.VAPID_PUBLIC_KEY,
     process.env.VAPID_PRIVATE_KEY,
   );

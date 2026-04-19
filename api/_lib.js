@@ -35,6 +35,17 @@ if (!redisUrl || !redisToken) {
 
 export const kv = new Redis({ url: redisUrl, token: redisToken });
 
+// Accept either a plain email or a full URL for VAPID_SUBJECT — the web-push
+// library requires a "mailto:" or "https://" scheme, so prepend "mailto:" for
+// bare email addresses.
+export function vapidSubject() {
+  const subj = (process.env.VAPID_SUBJECT || '').trim();
+  if (!subj) return '';
+  if (/^(mailto:|https?:\/\/)/i.test(subj)) return subj;
+  if (subj.includes('@')) return `mailto:${subj}`;
+  return subj; // leave as-is; web-push will surface its own error
+}
+
 // Upstash auto-serialises objects, but cold-starts occasionally return a raw
 // string. Tolerate both forms so callers always see a parsed record.
 export async function kvGetJson(key) {

@@ -4,7 +4,7 @@
 // Used by the Settings "Test notification" panel to verify the stack end-to-end.
 
 import webpush from 'web-push';
-import { kv, kvGetJson, endpointHash, readBody } from './_lib.js';
+import { kv, kvGetJson, endpointHash, readBody, vapidSubject } from './_lib.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -25,7 +25,7 @@ export default async function handler(req, res) {
   }
 
   webpush.setVapidDetails(
-    process.env.VAPID_SUBJECT,
+    vapidSubject(),
     process.env.VAPID_PUBLIC_KEY,
     process.env.VAPID_PRIVATE_KEY,
   );
