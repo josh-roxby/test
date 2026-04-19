@@ -11,17 +11,25 @@
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
+    <button id="gear" aria-label="Settings" type="button">⚙</button>
+
     <main id="app" aria-live="polite"></main>
 
     <nav id="tabbar" hidden>
-      <button data-route="home" class="tab" aria-label="Home">
+      <button data-route="diary" class="tab" aria-label="Diary">
+        <span class="tab-icon">📖</span><span class="tab-label">Diary</span>
+      </button>
+      <button data-route="habits" class="tab" aria-label="Habits">
+        <span class="tab-icon">✓</span><span class="tab-label">Habits</span>
+      </button>
+      <button data-route="home" class="tab" aria-label="Today">
         <span class="tab-icon">◐</span><span class="tab-label">Today</span>
       </button>
-      <button data-route="manage" class="tab" aria-label="Manage habits">
-        <span class="tab-icon">＋</span><span class="tab-label">Habits</span>
+      <button data-route="countdowns" class="tab" aria-label="Countdowns">
+        <span class="tab-icon">⏳</span><span class="tab-label">Soon</span>
       </button>
-      <button data-route="settings" class="tab" aria-label="Settings">
-        <span class="tab-icon">⚙</span><span class="tab-label">Settings</span>
+      <button data-route="reports" class="tab" aria-label="Reports">
+        <span class="tab-icon">📊</span><span class="tab-label">Reports</span>
       </button>
     </nav>
 

@@ -9,6 +9,7 @@ const DEFAULT_STATE = {
   version: 1,
   habits: [],
   logs: {},
+  countdowns: [],
   settings: {
     rolloverHour: 3,
   },
@@ -63,6 +64,40 @@ const MOOD_OPTIONS = [
   { value: 3, emoji: '😐', caption: 'okay' },
   { value: 4, emoji: '🙂', caption: 'good' },
   { value: 5, emoji: '😄', caption: 'great' },
+];
+
+const SLEEP_FACES = [
+  { value: 1, emoji: '😩', caption: 'awful' },
+  { value: 2, emoji: '😕', caption: 'poor'  },
+  { value: 3, emoji: '😐', caption: 'okay'  },
+  { value: 4, emoji: '🙂', caption: 'good'  },
+  { value: 5, emoji: '😴', caption: 'great' },
+];
+
+const DIARY_CAP = 140;
+
+const CHECKIN_STEPS = ['sleep', 'mood', 'prompt', 'habits', 'diary'];
+// + an implicit 'summary' step after all of the above.
+
+const COUNTDOWN_AUTO_ARCHIVE_MS = 24 * 60 * 60 * 1000; // auto-archive 24h past target
+
+const COUNTDOWN_THEMES = [
+  { id: 'sunset',    label: 'Sunset'    },
+  { id: 'ocean',     label: 'Ocean'     },
+  { id: 'forest',    label: 'Forest'    },
+  { id: 'aurora',    label: 'Aurora'    },
+  { id: 'peach',     label: 'Peach'     },
+  { id: 'lavender',  label: 'Lavender'  },
+  { id: 'neon',      label: 'Neon'      },
+  { id: 'mono',      label: 'Mono'      },
+  { id: 'candy',     label: 'Candy'     },
+  { id: 'confetti',  label: 'Confetti'  },
+  { id: 'snowfall',  label: 'Snowfall'  },
+  { id: 'tropical',  label: 'Tropical'  },
+  { id: 'midnight',  label: 'Midnight'  },
+  { id: 'rose',      label: 'Rose gold' },
+  { id: 'sage',      label: 'Sage'      },
+  { id: 'polka',     label: 'Polka'     },
 ];
 
 const FACTS = [
@@ -184,14 +219,20 @@ function ensureTodayLog() {
         ? PROMPTS[seed % PROMPTS.length]
         : FACTS[seed % FACTS.length],
       habits: {},
-      steps: { mood: false, prompt: false, habits: false },
+      sleep: null,                                 // { quality:1–5, hours:number|null }
+      diary: null,                                 // { good:string, challenge:string }
+      steps: { mood: false, prompt: false, habits: false, sleep: false, diary: false },
       completedAt: null,
     };
   } else {
-    // Backfill shape for older logs so steps check is safe.
+    // Backfill shape for older logs so future reads are safe.
     const log = state.logs[key];
     if (!log.steps) log.steps = { mood: !!log.mood, prompt: false, habits: false };
+    if (log.steps.sleep === undefined) log.steps.sleep = false;
+    if (log.steps.diary === undefined) log.steps.diary = false;
     if (!log.habits) log.habits = {};
+    if (log.sleep === undefined) log.sleep = null;
+    if (log.diary === undefined) log.diary = null;
     if (log.promptText == null) {
       const seed = strHash(key);
       const isReflect = seed % 2 === 0;
@@ -207,10 +248,110 @@ function ensureTodayLog() {
 function nextIncompleteStep() {
   const log = state.logs[currentDayKey()];
   if (!log) return 0;
-  if (!log.steps?.mood) return 0;
-  if (!log.steps?.prompt) return 1;
-  if (!log.steps?.habits) return 2;
+  for (let i = 0; i < CHECKIN_STEPS.length; i++) {
+    if (!log.steps?.[CHECKIN_STEPS[i]]) return i;
+  }
   return null;
+}
+
+// ---- Countdown helpers ------------------------------------------------------
+
+function countdownUid() {
+  return 'c_' + Math.random().toString(36).slice(2, 10);
+}
+
+function countdownTargetDate(c) {
+  return new Date(c.target);
+}
+
+function countdownMillisRemaining(c, now = new Date()) {
+  return countdownTargetDate(c).getTime() - now.getTime();
+}
+
+// "upcoming" | "happened" (target passed but < 24h ago) | "past" | "archived"
+function countdownStatus(c, now = new Date()) {
+  if (c.archivedAt) return 'archived';
+  const delta = countdownMillisRemaining(c, now);
+  if (delta > 0) return 'upcoming';
+  if (delta > -COUNTDOWN_AUTO_ARCHIVE_MS) return 'happened';
+  return 'past';
+}
+
+// For annual recurring countdowns whose target has passed, bump target forward
+// by whole years until it's in the future. Called once per render.
+function bumpAnnualCountdowns(now = new Date()) {
+  let changed = false;
+  for (const c of state.countdowns) {
+    if (c.archivedAt) continue;
+    if (c.recurring !== 'annual') continue;
+    const target = countdownTargetDate(c);
+    if (target.getTime() > now.getTime()) continue;
+    const bumped = new Date(target);
+    while (bumped.getTime() <= now.getTime()) {
+      bumped.setFullYear(bumped.getFullYear() + 1);
+    }
+    c.target = bumped.toISOString();
+    changed = true;
+  }
+  if (changed) save();
+}
+
+// Auto-archive non-recurring countdowns whose target passed more than 24h ago.
+function autoArchiveCountdowns(now = new Date()) {
+  let changed = false;
+  for (const c of state.countdowns) {
+    if (c.archivedAt) continue;
+    if (c.recurring === 'annual') continue;
+    const target = countdownTargetDate(c);
+    if (now.getTime() - target.getTime() > COUNTDOWN_AUTO_ARCHIVE_MS) {
+      c.archivedAt = now.toISOString();
+      changed = true;
+    }
+  }
+  if (changed) save();
+}
+
+// Runs on each render that touches countdowns.
+function reconcileCountdowns(now = new Date()) {
+  bumpAnnualCountdowns(now);
+  autoArchiveCountdowns(now);
+}
+
+function sortedUpcomingCountdowns() {
+  return state.countdowns
+    .filter((c) => !c.archivedAt)
+    .slice()
+    .sort((a, b) => countdownTargetDate(a).getTime() - countdownTargetDate(b).getTime());
+}
+
+function sortedArchivedCountdowns() {
+  return state.countdowns
+    .filter((c) => c.archivedAt)
+    .slice()
+    .sort((a, b) => new Date(b.archivedAt).getTime() - new Date(a.archivedAt).getTime());
+}
+
+function formatCountdownRemaining(c, now = new Date()) {
+  const status = countdownStatus(c, now);
+  if (status === 'archived') return 'archived';
+  if (status === 'happened') return '🎉 happened';
+  if (status === 'past') return 'past';
+  const delta = countdownMillisRemaining(c, now);
+  const days = Math.floor(delta / (24 * 3600 * 1000));
+  const hours = Math.floor((delta % (24 * 3600 * 1000)) / (3600 * 1000));
+  const mins = Math.floor((delta % (3600 * 1000)) / (60 * 1000));
+  if (days >= 7) return `${days} days`;
+  if (days >= 1) return `${days}d ${hours}h`;
+  if (hours >= 1) return `${hours}h ${mins}m`;
+  if (mins >= 1)  return `${mins}m`;
+  return '< 1m';
+}
+
+function formatCountdownTargetLabel(c) {
+  const d = countdownTargetDate(c);
+  return d.toLocaleDateString(undefined, {
+    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
+  }) + ' · ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 }
 
 function todayStateText(habit) {
@@ -305,6 +446,23 @@ function h(tag, attrs, ...children) {
   return node;
 }
 
+// SVG element builder (uses the SVG namespace so attrs like viewBox work).
+function svgEl(tag, attrs, ...children) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  if (attrs) {
+    for (const [k, v] of Object.entries(attrs)) {
+      if (v == null || v === false) continue;
+      el.setAttribute(k, String(v));
+    }
+  }
+  for (const c of children.flat(Infinity)) {
+    if (c == null || c === false) continue;
+    el.appendChild(typeof c === 'string' || typeof c === 'number'
+      ? document.createTextNode(String(c)) : c);
+  }
+  return el;
+}
+
 let toastTimer = null;
 function toast(message, ms = 2000) {
   let el = qs('#toast');
@@ -320,7 +478,9 @@ function toast(message, ms = 2000) {
 
 // ---- Router -----------------------------------------------------------------
 
-const ROUTES = new Set(['home', 'manage', 'settings']);
+const ROUTES = new Set([
+  'home', 'habits', 'diary', 'countdowns', 'reports', 'settings',
+]);
 let route = 'home';
 
 function go(next) {
@@ -332,10 +492,14 @@ function go(next) {
 function render() {
   const app = qs('#app');
   app.replaceChildren();
-  if (route === 'manage') app.appendChild(renderManage());
+  if (route === 'habits') app.appendChild(renderManage());
+  else if (route === 'diary') app.appendChild(renderDiary());
+  else if (route === 'countdowns') app.appendChild(renderCountdowns());
+  else if (route === 'reports') app.appendChild(renderReports());
   else if (route === 'settings') app.appendChild(renderSettings());
   else app.appendChild(renderHome());
   updateTabbar();
+  updateGear();
 }
 
 function updateTabbar() {
@@ -349,6 +513,23 @@ function updateTabbar() {
 function wireTabbar() {
   qsa('#tabbar .tab').forEach((btn) => {
     btn.addEventListener('click', () => go(btn.dataset.route));
+  });
+}
+
+function updateGear() {
+  const gear = qs('#gear');
+  if (!gear) return;
+  const onSettings = route === 'settings';
+  gear.classList.toggle('active', onSettings);
+  if (onSettings) gear.setAttribute('aria-current', 'page');
+  else gear.removeAttribute('aria-current');
+}
+
+function wireGear() {
+  const gear = qs('#gear');
+  if (!gear) return;
+  gear.addEventListener('click', () => {
+    go(route === 'settings' ? 'home' : 'settings');
   });
 }
 
@@ -368,27 +549,51 @@ function renderHome() {
   // Check-in status card
   const incomplete = nextIncompleteStep();
   const log = state.logs[currentDayKey()];
+  const anyStepDone = !!log && Object.values(log.steps || {}).some(Boolean);
+
   if (incomplete !== null) {
     view.appendChild(h('button', {
       class: 'primary block',
       style: { marginBottom: '16px' },
       onClick: () => openCheckIn(),
-    }, log && log.steps?.mood ? 'Resume check-in' : 'Start today\'s check-in'));
+    }, anyStepDone ? 'Resume check-in' : 'Start today\'s check-in'));
   } else if (log) {
-    const face = MOOD_OPTIONS.find((m) => m.value === log.mood);
+    const moodFace = MOOD_OPTIONS.find((m) => m.value === log.mood);
+    const sleepFace = log.sleep?.quality
+      ? SLEEP_FACES.find((s) => s.value === log.sleep.quality) : null;
+    const row = h('div', { class: 'row', style: { gap: '16px' } });
+    if (sleepFace) {
+      row.appendChild(h('div', null,
+        h('div', { class: 'small muted' }, 'slept'),
+        h('div', { style: { fontSize: '1.2rem', marginTop: '2px' } },
+          `${sleepFace.emoji} ${sleepFace.caption}`),
+      ));
+    }
+    if (moodFace) {
+      row.appendChild(h('div', null,
+        h('div', { class: 'small muted' }, 'mood'),
+        h('div', { style: { fontSize: '1.2rem', marginTop: '2px' } },
+          `${moodFace.emoji} ${moodFace.caption}`),
+      ));
+    }
     view.appendChild(h('div', { class: 'summary', style: { marginBottom: '16px' } },
-      h('div', { class: 'row between' },
-        h('div', null,
-          h('div', { class: 'small muted' }, 'Checked in'),
-          h('div', { style: { fontSize: '1.2rem', marginTop: '2px' } },
-            `${face?.emoji || '✨'} ${face?.caption || ''}`),
-        ),
+      h('div', { class: 'row between', style: { alignItems: 'flex-start' } },
+        row,
         h('button', {
           class: 'ghost small',
           onClick: () => openCheckIn(0),
         }, 'Edit'),
       ),
     ));
+  }
+
+  // Next upcoming countdown (peek strip)
+  const nextCountdown = sortedUpcomingCountdowns()[0];
+  if (nextCountdown) {
+    view.appendChild(renderCountdownTile(nextCountdown, {
+      style: { marginBottom: '16px', minHeight: '90px' },
+      onClick: () => go('countdowns'),
+    }));
   }
 
   const active = state.habits.filter((x) => !x.archivedAt);
@@ -401,7 +606,7 @@ function renderHome() {
         'Track habits you want to build and break, log your mood daily, and watch patterns emerge on a private heatmap. Everything stays on this device.'),
       h('button', {
         class: 'primary block',
-        onClick: () => go('manage'),
+        onClick: () => go('habits'),
       }, 'Add your first habit'),
     ));
     return view;
@@ -793,6 +998,785 @@ function deleteHabitConfirm(id) {
   toast('Deleted');
 }
 
+// ---- Diary tab --------------------------------------------------------------
+
+function diaryStepIndex() {
+  return CHECKIN_STEPS.indexOf('diary');
+}
+
+function renderDiary() {
+  const view = h('div', { class: 'view' });
+  view.appendChild(h('h1', 'Diary'));
+  view.appendChild(h('p', { class: 'muted', style: { marginBottom: '16px' } },
+    `140-char snapshots of each day.`));
+
+  const allDays = Object.keys(state.logs).sort().reverse();
+  const daysWithDiary = allDays.filter((day) => {
+    const d = state.logs[day]?.diary;
+    return d && (d.good || d.challenge);
+  });
+
+  const todayKey = currentDayKey();
+  const todayLog = state.logs[todayKey];
+  const todayHasDiary = !!(todayLog?.diary && (todayLog.diary.good || todayLog.diary.challenge));
+
+  if (!todayHasDiary) {
+    view.appendChild(h('button', {
+      class: 'primary block',
+      style: { marginBottom: '16px' },
+      onClick: () => openCheckIn(diaryStepIndex()),
+    }, 'Write today\'s entry'));
+  }
+
+  if (daysWithDiary.length === 0) {
+    view.appendChild(h('div', { class: 'summary' },
+      h('h2', { style: { color: 'var(--text)', fontSize: '1.15rem', margin: '0 0 6px' } },
+        'Nothing yet'),
+      h('p', { style: { margin: 0 } },
+        'Each day you check in, jot down one good thing and one challenge. They\'ll appear here as a timeline.'),
+    ));
+    return view;
+  }
+
+  const list = h('div', { class: 'stack' });
+  for (const day of daysWithDiary) list.appendChild(renderDiaryCard(day));
+  view.appendChild(list);
+
+  return view;
+}
+
+function renderDiaryCard(dayKey) {
+  const log = state.logs[dayKey];
+  const diary = log.diary;
+  const date = parseDayKey(dayKey);
+  const todayKey = currentDayKey();
+  const isToday = dayKey === todayKey;
+  const displayDate = isToday
+    ? 'Today'
+    : date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+
+  const moodFace = log.mood ? MOOD_OPTIONS.find((m) => m.value === log.mood) : null;
+  const sleepFace = log.sleep?.quality
+    ? SLEEP_FACES.find((s) => s.value === log.sleep.quality) : null;
+
+  const card = h('article', { class: 'prompt-card', style: { marginBottom: '10px' } });
+
+  card.appendChild(h('div', {
+    class: 'row between',
+    style: { marginBottom: '10px', alignItems: 'center' },
+  },
+    h('div', { class: 'kicker' }, displayDate),
+    h('div', { class: 'row', style: { gap: '8px', fontSize: '0.95rem' } },
+      sleepFace ? h('span', { title: `slept ${sleepFace.caption}` }, sleepFace.emoji) : null,
+      moodFace ? h('span', { title: `felt ${moodFace.caption}` }, moodFace.emoji) : null,
+    ),
+  ));
+
+  if (diary.good) {
+    card.appendChild(h('p', {
+      style: { margin: '0 0 6px', color: 'var(--text)', lineHeight: 1.45 },
+    }, h('span', { class: 'kicker' }, 'Good'), ' ', diary.good));
+  }
+  if (diary.challenge) {
+    card.appendChild(h('p', {
+      style: { margin: 0, color: 'var(--text)', lineHeight: 1.45 },
+    }, h('span', { class: 'kicker' }, 'Challenge'), ' ', diary.challenge));
+  }
+
+  if (isToday) {
+    card.appendChild(h('div', {
+      class: 'row',
+      style: { justifyContent: 'flex-end', marginTop: '10px' },
+    },
+      h('button', {
+        class: 'ghost small',
+        onClick: () => openCheckIn(diaryStepIndex()),
+      }, 'Edit'),
+    ));
+  }
+
+  return card;
+}
+
+// ---- Countdowns tab ---------------------------------------------------------
+
+// null = list view; 'new' = create form; '<id>' = edit form.
+let editingCountdownId = null;
+
+function startNewCountdown() { editingCountdownId = 'new'; render(); }
+function startEditCountdown(id) { editingCountdownId = id; render(); }
+function cancelCountdownEdit() { editingCountdownId = null; render(); }
+
+function isoToDatetimeLocal(iso) {
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  } catch { return ''; }
+}
+
+function datetimeLocalToIso(local) {
+  if (!local) return null;
+  const d = new Date(local);
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
+function renderCountdowns() {
+  reconcileCountdowns();
+  if (editingCountdownId !== null) return renderCountdownEdit();
+
+  const view = h('div', { class: 'view' });
+  view.appendChild(h('div', {
+    class: 'row between', style: { marginBottom: '8px' },
+  },
+    h('h1', 'Coming up'),
+    h('button', { class: 'primary', onClick: startNewCountdown }, '+ New'),
+  ));
+
+  const upcoming = sortedUpcomingCountdowns();
+  const archived = sortedArchivedCountdowns();
+
+  if (upcoming.length === 0 && archived.length === 0) {
+    view.appendChild(h('div', { class: 'summary', style: { marginTop: '8px' } },
+      h('h2', { style: { color: 'var(--text)', fontSize: '1.15rem', margin: '0 0 6px' } },
+        'No countdowns yet'),
+      h('p', { style: { margin: '0 0 14px' } },
+        'Track birthdays, holidays, milestones, deadlines — whatever you\'re counting toward. Each gets its own vibe.'),
+      h('button', { class: 'primary block', onClick: startNewCountdown },
+        'Add your first countdown'),
+    ));
+    return view;
+  }
+
+  if (upcoming.length > 0) {
+    view.appendChild(h('div', { class: 'section-head', style: { margin: '12px 0 8px' } },
+      'Upcoming'));
+    const grid = h('div', { class: 'stack' });
+    upcoming.forEach((c) => grid.appendChild(renderCountdownTile(c)));
+    view.appendChild(grid);
+  }
+
+  if (archived.length > 0) {
+    view.appendChild(h('div', { class: 'section-head', style: { margin: '20px 0 8px' } },
+      'Archived'));
+    const grid = h('div', { class: 'stack' });
+    archived.forEach((c) => grid.appendChild(renderCountdownTile(c)));
+    view.appendChild(grid);
+  }
+
+  return view;
+}
+
+function renderCountdownTile(c, opts = {}) {
+  const themeClass = `theme-${c.theme || 'mono'}`;
+  const kicker =
+    c.recurring === 'annual' ? 'Annual' :
+    c.archivedAt ? 'Archived' :
+    (c.description || '');
+
+  return h('div', {
+      class: `countdown-tile ${themeClass}`,
+      style: opts.style,
+      onClick: opts.onClick || (() => startEditCountdown(c.id)),
+      role: 'button',
+      tabindex: '0',
+      'aria-label': `${c.title}: ${formatCountdownRemaining(c)}`,
+    },
+    h('div', null,
+      kicker ? h('div', { class: 'c-sub' }, kicker) : null,
+      h('div', { class: 'c-title' }, c.title),
+    ),
+    h('div', null,
+      h('div', { class: 'c-remaining' }, formatCountdownRemaining(c)),
+      h('div', { class: 'c-target' }, formatCountdownTargetLabel(c)),
+    ),
+  );
+}
+
+function renderCountdownEdit() {
+  const isNew = editingCountdownId === 'new';
+  const existing = isNew ? null : state.countdowns.find((c) => c.id === editingCountdownId);
+  if (!isNew && !existing) {
+    editingCountdownId = null;
+    return renderCountdowns();
+  }
+
+  const defaultTarget = new Date();
+  defaultTarget.setDate(defaultTarget.getDate() + 7);
+  defaultTarget.setHours(12, 0, 0, 0);
+
+  const draft = isNew ? {
+    id: countdownUid(),
+    title: '',
+    description: '',
+    target: defaultTarget.toISOString(),
+    theme: COUNTDOWN_THEMES[0].id,
+    recurring: null,
+    archivedAt: null,
+    createdAt: new Date().toISOString(),
+  } : { ...existing };
+
+  const view = h('div', { class: 'view' });
+
+  view.appendChild(h('div', { class: 'row between', style: { marginBottom: '8px' } },
+    h('button', { class: 'ghost', onClick: cancelCountdownEdit }, '← Back'),
+    h('h1', { style: { fontSize: '1.15rem' } }, isNew ? 'New countdown' : 'Edit countdown'),
+    h('span', { style: { width: '64px' } }),
+  ));
+
+  // Title
+  view.appendChild(h('label', 'Title'));
+  const titleIn = h('input', {
+    type: 'text', maxlength: 60, placeholder: "Dad's birthday",
+  });
+  titleIn.value = draft.title;
+  titleIn.addEventListener('input', () => { draft.title = titleIn.value; });
+  view.appendChild(titleIn);
+
+  // Description
+  view.appendChild(h('label', 'Description (optional)'));
+  const descIn = h('input', {
+    type: 'text', maxlength: 200, placeholder: 'Dinner at the Italian place',
+  });
+  descIn.value = draft.description || '';
+  descIn.addEventListener('input', () => { draft.description = descIn.value; });
+  view.appendChild(descIn);
+
+  // Target datetime
+  view.appendChild(h('label', 'Date & time'));
+  const dtIn = h('input', { type: 'datetime-local' });
+  dtIn.value = isoToDatetimeLocal(draft.target);
+  dtIn.addEventListener('input', () => {
+    const iso = datetimeLocalToIso(dtIn.value);
+    if (iso) draft.target = iso;
+  });
+  view.appendChild(dtIn);
+
+  // Days-from-now shortcut
+  view.appendChild(h('label', 'Or days from now'));
+  const daysIn = h('input', {
+    type: 'number', min: 0, max: 3650, step: 1, inputmode: 'numeric',
+    placeholder: '42',
+  });
+  daysIn.addEventListener('input', () => {
+    const n = Number(daysIn.value);
+    if (!Number.isFinite(n) || n < 0) return;
+    const d = new Date();
+    d.setDate(d.getDate() + n);
+    d.setHours(12, 0, 0, 0);
+    draft.target = d.toISOString();
+    dtIn.value = isoToDatetimeLocal(draft.target);
+  });
+  view.appendChild(daysIn);
+
+  // Recurring
+  view.appendChild(h('label', 'Recurring'));
+  view.appendChild(renderSegmented(
+    [
+      { id: 'one',    label: 'One-off'        },
+      { id: 'annual', label: 'Annual (birthday)' },
+    ],
+    draft.recurring === 'annual' ? 'annual' : 'one',
+    (v) => { draft.recurring = v === 'annual' ? 'annual' : null; },
+  ));
+
+  // Theme picker
+  view.appendChild(h('label', 'Theme'));
+  const grid = h('div', {
+    class: 'palette',
+    style: { gridTemplateColumns: 'repeat(4, 1fr)' },
+  });
+  function paintThemes() {
+    grid.replaceChildren();
+    COUNTDOWN_THEMES.forEach((t) => {
+      grid.appendChild(h('div', {
+        class: `theme-swatch theme-${t.id}` + (draft.theme === t.id ? ' selected' : ''),
+        role: 'button',
+        'aria-label': `Theme ${t.label}`,
+        tabindex: '0',
+        title: t.label,
+        onClick: () => { draft.theme = t.id; paintThemes(); },
+      }));
+    });
+  }
+  paintThemes();
+  view.appendChild(grid);
+
+  // Actions
+  const actions = h('div', { class: 'stack', style: { marginTop: '24px' } });
+  actions.appendChild(h('button', {
+    class: 'primary block',
+    onClick: () => saveCountdownDraft(draft, isNew),
+  }, 'Save'));
+
+  if (!isNew) {
+    if (existing.archivedAt) {
+      actions.appendChild(h('button', {
+        class: 'block ghost',
+        onClick: () => unarchiveCountdown(existing.id),
+      }, 'Unarchive'));
+    } else {
+      actions.appendChild(h('button', {
+        class: 'block ghost',
+        onClick: () => archiveCountdown(existing.id),
+      }, 'Archive'));
+    }
+    actions.appendChild(h('button', {
+      class: 'block danger',
+      onClick: () => deleteCountdownConfirm(existing.id),
+    }, 'Delete permanently'));
+  }
+  view.appendChild(actions);
+
+  return view;
+}
+
+function saveCountdownDraft(draft, isNew) {
+  const title = (draft.title || '').trim();
+  if (!title) { toast('Please enter a title'); return; }
+  draft.title = title;
+  draft.description = (draft.description || '').trim();
+  const target = new Date(draft.target);
+  if (isNaN(target.getTime())) { toast('Please pick a valid date'); return; }
+
+  if (isNew) {
+    state.countdowns.push(draft);
+  } else {
+    const i = state.countdowns.findIndex((c) => c.id === draft.id);
+    if (i >= 0) state.countdowns[i] = draft;
+  }
+  save();
+  editingCountdownId = null;
+  render();
+  toast(isNew ? 'Countdown added' : 'Saved');
+}
+
+function archiveCountdown(id) {
+  const c = state.countdowns.find((x) => x.id === id);
+  if (!c) return;
+  c.archivedAt = new Date().toISOString();
+  save();
+  editingCountdownId = null;
+  render();
+  toast('Archived');
+}
+
+function unarchiveCountdown(id) {
+  const c = state.countdowns.find((x) => x.id === id);
+  if (!c) return;
+  c.archivedAt = null;
+  save();
+  editingCountdownId = null;
+  render();
+  toast('Unarchived');
+}
+
+function deleteCountdownConfirm(id) {
+  const c = state.countdowns.find((x) => x.id === id);
+  if (!c) return;
+  if (!confirm(`Delete "${c.title}"?`)) return;
+  state.countdowns = state.countdowns.filter((x) => x.id !== id);
+  save();
+  editingCountdownId = null;
+  render();
+  toast('Deleted');
+}
+
+// ---- Reports tab ------------------------------------------------------------
+
+let reportsSubTab = 'overview';   // 'overview' | 'mood' | 'sleep' | 'habits'
+let reportsRange  = 'week';       // 'week' | 'month'
+
+function rangeDayCount(range) {
+  return range === 'month' ? 30 : 7;
+}
+
+function rangeDayKeys(range) {
+  const n = rangeDayCount(range);
+  const today = currentDayKey();
+  const keys = [];
+  for (let i = n - 1; i >= 0; i--) keys.push(daysAgo(today, i));
+  return keys;
+}
+
+function rangeLabels(range) {
+  const days = rangeDayKeys(range);
+  return days.map((key, i) => {
+    const d = parseDayKey(key);
+    if (range === 'week') {
+      return d.toLocaleDateString(undefined, { weekday: 'narrow' });
+    }
+    // month: first, every 5th, and last index get a day-number label; others blank
+    const n = days.length;
+    const showIdx = new Set([0, Math.floor(n / 4), Math.floor(n / 2), Math.floor(3 * n / 4), n - 1]);
+    return showIdx.has(i) ? d.toLocaleDateString(undefined, { day: 'numeric' }) : '';
+  });
+}
+
+function moodSeries(range) {
+  return rangeDayKeys(range).map((key) => state.logs[key]?.mood ?? null);
+}
+
+function sleepQualitySeries(range) {
+  return rangeDayKeys(range).map((key) => state.logs[key]?.sleep?.quality ?? null);
+}
+
+function sleepHoursSeries(range) {
+  return rangeDayKeys(range).map((key) => state.logs[key]?.sleep?.hours ?? null);
+}
+
+function completionSeries(range) {
+  const active = state.habits.filter((x) => !x.archivedAt);
+  return rangeDayKeys(range).map((key) => {
+    if (active.length === 0) return null;
+    const done = active.filter((ht) => isHabitDoneForDay(ht, key)).length;
+    return Math.round((done / active.length) * 100);
+  });
+}
+
+function hasAnyValue(arr) {
+  return arr.some((v) => v != null);
+}
+
+// series: [{ values, color, dashed? }]
+// yAxis:  { min, max, ticks? }
+function svgLineChart({ series, labels, yAxis, height = 180 }) {
+  const width = 340;
+  const pad = { top: 14, right: 12, bottom: 22, left: 28 };
+  const plotW = width - pad.left - pad.right;
+  const plotH = height - pad.top - pad.bottom;
+  const n = labels.length;
+  const xs = (i) => pad.left + (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+  const ys = (v) => pad.top + plotH - ((v - yAxis.min) / (yAxis.max - yAxis.min)) * plotH;
+
+  const svg = svgEl('svg', {
+    viewBox: `0 0 ${width} ${height}`,
+    width: '100%', height,
+    class: 'chart', role: 'img',
+    preserveAspectRatio: 'none',
+  });
+
+  // Y grid + labels
+  const ticks = yAxis.ticks || [yAxis.min, (yAxis.min + yAxis.max) / 2, yAxis.max];
+  for (const t of ticks) {
+    const y = ys(t);
+    svg.appendChild(svgEl('line', {
+      x1: pad.left, x2: width - pad.right, y1: y, y2: y,
+      stroke: 'var(--border)', 'stroke-width': 1,
+    }));
+    svg.appendChild(svgEl('text', {
+      x: pad.left - 6, y: y + 3,
+      'text-anchor': 'end',
+      fill: 'var(--muted)',
+      'font-size': 10,
+    }, String(t)));
+  }
+
+  // X labels
+  for (let i = 0; i < n; i++) {
+    if (!labels[i]) continue;
+    svg.appendChild(svgEl('text', {
+      x: xs(i), y: height - 6,
+      'text-anchor': 'middle',
+      fill: 'var(--muted)',
+      'font-size': 9,
+    }, labels[i]));
+  }
+
+  // Series
+  for (const s of series) {
+    const color = s.color || 'var(--accent)';
+    const segments = [];
+    let seg = [];
+    s.values.forEach((v, i) => {
+      if (v == null) {
+        if (seg.length) segments.push(seg);
+        seg = [];
+      } else {
+        seg.push({ x: xs(i), y: ys(v) });
+      }
+    });
+    if (seg.length) segments.push(seg);
+
+    for (const part of segments) {
+      if (part.length >= 2) {
+        const d = part.map((p, i) =>
+          `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
+        const path = svgEl('path', {
+          d, stroke: color, 'stroke-width': 2, fill: 'none',
+          'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+        });
+        if (s.dashed) path.setAttribute('stroke-dasharray', '4 4');
+        svg.appendChild(path);
+      }
+      if (!s.dashed) {
+        for (const p of part) {
+          svg.appendChild(svgEl('circle', {
+            cx: p.x, cy: p.y, r: 3, fill: color,
+          }));
+        }
+      }
+    }
+  }
+
+  return svg;
+}
+
+function chartCard(chart) {
+  return h('div', {
+    class: 'prompt-card',
+    style: { padding: '10px', overflowX: 'auto' },
+  }, chart);
+}
+
+function legendItem(color, label) {
+  return h('span', { class: 'small', style: { display: 'inline-flex', alignItems: 'center', gap: '4px' } },
+    h('span', { style: { color } }, '●'), label);
+}
+
+function renderReports() {
+  const view = h('div', { class: 'view' });
+  view.appendChild(h('h1', { style: { marginBottom: '8px' } }, 'Reports'));
+
+  const noLogs = Object.keys(state.logs).length === 0;
+  const noHabits = state.habits.length === 0;
+  if (noLogs && noHabits) {
+    view.appendChild(h('div', { class: 'summary' },
+      h('h2', { style: { color: 'var(--text)', fontSize: '1.15rem', margin: '0 0 6px' } },
+        'Nothing to chart yet'),
+      h('p', { style: { margin: '0 0 14px' } },
+        'Check in for a few days — mood, sleep, and habit trends will appear here as lines and heatmaps.'),
+      h('button', { class: 'primary block', onClick: () => go('home') },
+        'Go to today'),
+    ));
+    return view;
+  }
+
+  const tabs = h('div', { class: 'segmented', style: { marginBottom: '10px' } });
+  for (const { id, label } of [
+    { id: 'overview', label: 'Overview' },
+    { id: 'mood',     label: 'Mood'     },
+    { id: 'sleep',    label: 'Sleep'    },
+    { id: 'habits',   label: 'Habits'   },
+  ]) {
+    tabs.appendChild(h('button', {
+      class: reportsSubTab === id ? 'on' : '',
+      onClick: () => { reportsSubTab = id; render(); },
+      type: 'button',
+    }, label));
+  }
+  view.appendChild(tabs);
+
+  const range = h('div', {
+    class: 'segmented',
+    style: { marginBottom: '14px', maxWidth: '220px', marginLeft: 'auto' },
+  });
+  for (const { id, label } of [
+    { id: 'week',  label: 'Week'  },
+    { id: 'month', label: 'Month' },
+  ]) {
+    range.appendChild(h('button', {
+      class: reportsRange === id ? 'on' : '',
+      onClick: () => { reportsRange = id; render(); },
+      type: 'button',
+    }, label));
+  }
+  view.appendChild(range);
+
+  if (reportsSubTab === 'mood')    view.appendChild(renderReportsMood());
+  else if (reportsSubTab === 'sleep')  view.appendChild(renderReportsSleep());
+  else if (reportsSubTab === 'habits') view.appendChild(renderReportsHabits());
+  else view.appendChild(renderReportsOverview());
+
+  return view;
+}
+
+function renderReportsOverview() {
+  const wrap = h('div');
+  const labels = rangeLabels(reportsRange);
+  const moodVals  = moodSeries(reportsRange).map((v) => v == null ? null : v * 20);
+  const sleepVals = sleepQualitySeries(reportsRange).map((v) => v == null ? null : v * 20);
+  const compVals  = completionSeries(reportsRange);
+
+  if (!hasAnyValue(moodVals) && !hasAnyValue(sleepVals) && !hasAnyValue(compVals)) {
+    wrap.appendChild(h('p', { class: 'small muted' },
+      'No data for this range yet — check in a few days to see trends.'));
+    return wrap;
+  }
+
+  wrap.appendChild(h('div', {
+    class: 'row', style: { gap: '14px', flexWrap: 'wrap', marginBottom: '8px' },
+  },
+    legendItem('#7c9cff', 'Mood'),
+    legendItem('#c084fc', 'Sleep'),
+    legendItem('#86efac', 'Completion'),
+  ));
+
+  wrap.appendChild(chartCard(svgLineChart({
+    series: [
+      { values: moodVals,  color: '#7c9cff' },
+      { values: sleepVals, color: '#c084fc' },
+      { values: compVals,  color: '#86efac' },
+    ],
+    labels,
+    yAxis: { min: 0, max: 100, ticks: [0, 50, 100] },
+    height: 200,
+  })));
+
+  wrap.appendChild(h('p', { class: 'small muted', style: { marginTop: '6px' } },
+    'Mood and sleep scaled to 0–100 for comparison. Completion is the % of active habits you hit that day.'));
+
+  return wrap;
+}
+
+function renderReportsMood() {
+  const wrap = h('div');
+  const labels = rangeLabels(reportsRange);
+  const values = moodSeries(reportsRange);
+  const valid = values.filter((v) => v != null);
+
+  wrap.appendChild(renderStatsPills('mood', valid, values.length));
+
+  if (valid.length === 0) {
+    wrap.appendChild(h('p', { class: 'small muted' },
+      'No mood logs in this range yet.'));
+    return wrap;
+  }
+
+  wrap.appendChild(chartCard(svgLineChart({
+    series: [{ values, color: '#7c9cff' }],
+    labels,
+    yAxis: { min: 1, max: 5, ticks: [1, 3, 5] },
+    height: 180,
+  })));
+  return wrap;
+}
+
+function renderReportsSleep() {
+  const wrap = h('div');
+  const labels = rangeLabels(reportsRange);
+  const quality = sleepQualitySeries(reportsRange);
+  const hours = sleepHoursSeries(reportsRange);
+  const validQ = quality.filter((v) => v != null);
+
+  wrap.appendChild(renderStatsPills('sleep', validQ, quality.length));
+
+  if (validQ.length === 0) {
+    wrap.appendChild(h('p', { class: 'small muted' },
+      'No sleep logs in this range yet.'));
+    return wrap;
+  }
+
+  wrap.appendChild(h('div', { class: 'small muted', style: { margin: '0 0 4px' } },
+    'Quality (1–5)'));
+  wrap.appendChild(chartCard(svgLineChart({
+    series: [{ values: quality, color: '#c084fc' }],
+    labels,
+    yAxis: { min: 1, max: 5, ticks: [1, 3, 5] },
+    height: 160,
+  })));
+
+  if (hasAnyValue(hours)) {
+    const maxH = Math.max(10, Math.ceil(Math.max(...hours.filter((v) => v != null))));
+    wrap.appendChild(h('div', { class: 'small muted', style: { margin: '14px 0 4px' } },
+      'Hours'));
+    wrap.appendChild(chartCard(svgLineChart({
+      series: [{ values: hours, color: '#60a5fa' }],
+      labels,
+      yAxis: { min: 0, max: maxH, ticks: [0, Math.floor(maxH / 2), maxH] },
+      height: 160,
+    })));
+  }
+  return wrap;
+}
+
+function renderStatsPills(kind, valid, total) {
+  const pills = h('div', {
+    class: 'row', style: { gap: '6px', flexWrap: 'wrap', marginBottom: '10px' },
+  });
+  if (valid.length === 0) {
+    pills.appendChild(h('span', { class: 'pill' }, 'No data yet'));
+    return pills;
+  }
+  const avg = (valid.reduce((a, b) => a + b, 0) / valid.length).toFixed(1);
+  const hi  = Math.max(...valid);
+  const lo  = Math.min(...valid);
+  const bank = kind === 'mood' ? MOOD_OPTIONS : SLEEP_FACES;
+  const faceOf = (v) => bank.find((m) => m.value === v)?.emoji || '';
+  pills.appendChild(h('span', { class: 'pill' }, `avg ${avg}`));
+  pills.appendChild(h('span', { class: 'pill' }, `best ${faceOf(hi)}`));
+  pills.appendChild(h('span', { class: 'pill' }, `low ${faceOf(lo)}`));
+  pills.appendChild(h('span', { class: 'pill' }, `${valid.length}/${total} days`));
+  return pills;
+}
+
+function renderReportsHabits() {
+  const wrap = h('div');
+  const active = state.habits.filter((x) => !x.archivedAt);
+
+  if (active.length === 0) {
+    wrap.appendChild(h('p', { class: 'small muted' },
+      'No habits to chart. Add a few in the Habits tab.'));
+    return wrap;
+  }
+
+  for (const habit of active) wrap.appendChild(renderHabitReportCard(habit));
+  return wrap;
+}
+
+function renderHabitReportCard(habit) {
+  const card = h('article', {
+    class: 'prompt-card',
+    style: { marginBottom: '10px' },
+  });
+
+  card.appendChild(h('div', {
+    class: 'row between', style: { marginBottom: '8px', alignItems: 'flex-start' },
+  },
+    h('div', null,
+      h('div', { class: 'kicker' }, habit.kind === 'good' ? 'Build' : 'Break'),
+      h('div', { class: 'c-title' }, habit.title),
+      h('div', { class: 'small muted' }, habitMeta(habit)),
+    ),
+    currentStreak(habit) > 0
+      ? h('span', { class: 'streak' },
+          `🔥 ${currentStreak(habit)}-day ${habit.kind === 'good' ? 'streak' : 'clean'}`)
+      : null,
+  ));
+
+  if (habit.type === 'tick') {
+    card.appendChild(renderHeatmap(habit));
+    return card;
+  }
+
+  const labels = rangeLabels(reportsRange);
+  const days = rangeDayKeys(reportsRange);
+  const values = days.map((key) => {
+    const v = state.logs[key]?.habits?.[habit.id];
+    return v == null ? null : Number(v);
+  });
+  const maxValRaw = Math.max(
+    habit.target,
+    ...values.filter((v) => v != null),
+  );
+  const yMax = habit.type === 'percent'
+    ? 100
+    : Math.max(Math.ceil(maxValRaw * 1.1), habit.target);
+  const target = new Array(days.length).fill(habit.target);
+
+  card.appendChild(chartCard(svgLineChart({
+    series: [
+      { values: target, color: 'var(--muted)', dashed: true },
+      { values,         color: habit.color },
+    ],
+    labels,
+    yAxis: { min: 0, max: yMax, ticks: [0, Math.round(yMax / 2), yMax] },
+    height: 140,
+  })));
+  return card;
+}
+
 // ---- Settings ---------------------------------------------------------------
 
 function renderSettings() {
@@ -939,7 +1923,7 @@ function openCheckIn(startStep = null) {
   const log = state.logs[currentDayKey()];
   checkInHabitBuffer = { ...(log.habits || {}) };
   checkInOpen = true;
-  checkInStep = startStep ?? (nextIncompleteStep() ?? 3);
+  checkInStep = startStep ?? (nextIncompleteStep() ?? CHECKIN_STEPS.length);
   renderCheckIn();
 }
 
@@ -961,25 +1945,30 @@ function maybeOpenCheckIn() {
 
 function nextStep() {
   const log = ensureTodayLog();
-  if (checkInStep === 0) {
+  const name = CHECKIN_STEPS[checkInStep];
+
+  if (name === 'sleep') {
+    // Any state (including untouched) is fine — sleep is skippable.
+    log.steps.sleep = true;
+  } else if (name === 'mood') {
     if (!log.mood) { toast('Pick a mood first'); return; }
     log.steps.mood = true;
-    save();
-    checkInStep = 1;
-  } else if (checkInStep === 1) {
+  } else if (name === 'prompt') {
     log.steps.prompt = true;
-    save();
-    checkInStep = 2;
-  } else if (checkInStep === 2) {
+  } else if (name === 'habits') {
     log.habits = { ...checkInHabitBuffer };
     log.steps.habits = true;
+  } else if (name === 'diary') {
+    log.steps.diary = true;
     log.completedAt = new Date().toISOString();
-    save();
-    checkInStep = 3;
-  } else if (checkInStep === 3) {
+  } else {
+    // At summary — "Done" button.
     closeCheckIn(false);
     return;
   }
+
+  save();
+  checkInStep++;
   renderCheckIn();
 }
 
@@ -1000,8 +1989,9 @@ function renderCheckIn() {
   }});
   const sheet = h('div', { class: 'sheet' });
 
+  const totalPips = CHECKIN_STEPS.length + 1; // + summary
   const progress = h('div', { class: 'progress' });
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < totalPips; i++) {
     progress.appendChild(h('span', { class: i <= checkInStep ? 'active' : '' }));
   }
 
@@ -1017,25 +2007,122 @@ function renderCheckIn() {
   ));
 
   const body = h('div', { class: 'body' });
-  if (checkInStep === 0) body.appendChild(renderMoodStep());
-  else if (checkInStep === 1) body.appendChild(renderPromptStep());
-  else if (checkInStep === 2) body.appendChild(renderHabitsStep());
+  const name = CHECKIN_STEPS[checkInStep];
+  if (name === 'sleep') body.appendChild(renderSleepStep());
+  else if (name === 'mood') body.appendChild(renderMoodStep());
+  else if (name === 'prompt') body.appendChild(renderPromptStep());
+  else if (name === 'habits') body.appendChild(renderHabitsStep());
+  else if (name === 'diary') body.appendChild(renderDiaryStep());
   else body.appendChild(renderSummaryStep());
   sheet.appendChild(body);
 
+  const atSummary = checkInStep >= CHECKIN_STEPS.length;
+  const atLastInput = checkInStep === CHECKIN_STEPS.length - 1;
+
   const footer = h('footer');
-  if (checkInStep > 0 && checkInStep < 3) {
+  if (checkInStep > 0 && !atSummary) {
     footer.appendChild(h('button', { class: 'ghost', onClick: prevStep }, 'Back'));
   }
   footer.appendChild(h('span', { class: 'grow' }));
-  const nextLabel =
-    checkInStep === 2 ? 'Finish' :
-    checkInStep === 3 ? 'Done' : 'Next';
+  const nextLabel = atSummary ? 'Done' : atLastInput ? 'Finish' : 'Next';
   footer.appendChild(h('button', { class: 'primary', onClick: nextStep }, nextLabel));
   sheet.appendChild(footer);
 
   scrim.appendChild(sheet);
   document.body.appendChild(scrim);
+}
+
+function renderSleepStep() {
+  const log = ensureTodayLog();
+  if (!log.sleep) log.sleep = { quality: null, hours: null };
+
+  const wrap = h('div', { class: 'step' });
+  wrap.appendChild(h('h2', { style: { color: 'var(--text)', fontSize: '1.25rem', margin: '4px 0 4px' } },
+    'How did you sleep?'));
+  wrap.appendChild(h('p', { class: 'small muted', style: { marginBottom: '12px' } },
+    'Pick a face. Hours are optional — skip anything.'));
+
+  const grid = h('div', { class: 'mood-grid' });
+  SLEEP_FACES.forEach((opt) => {
+    grid.appendChild(h('button', {
+      class: 'mood-btn' + (log.sleep.quality === opt.value ? ' selected' : ''),
+      type: 'button',
+      'aria-label': `Sleep ${opt.caption}`,
+      onClick: () => {
+        log.sleep.quality = opt.value;
+        save();
+        renderCheckIn();
+      },
+    }, opt.emoji));
+  });
+  wrap.appendChild(grid);
+
+  const caption = log.sleep.quality
+    ? SLEEP_FACES.find((s) => s.value === log.sleep.quality).caption
+    : ' ';
+  wrap.appendChild(h('div', { class: 'mood-caption' }, caption));
+
+  wrap.appendChild(h('label', 'Hours (optional)'));
+  const hoursIn = h('input', {
+    type: 'number', min: 0, max: 24, step: 0.5,
+    inputmode: 'decimal', placeholder: 'e.g. 7.5',
+  });
+  hoursIn.value = log.sleep.hours ?? '';
+  hoursIn.addEventListener('input', () => {
+    const raw = hoursIn.value;
+    if (raw === '') {
+      log.sleep.hours = null;
+    } else {
+      const n = Number(raw);
+      log.sleep.hours = Number.isFinite(n) ? Math.min(24, Math.max(0, n)) : null;
+    }
+    save();
+  });
+  wrap.appendChild(hoursIn);
+
+  return wrap;
+}
+
+function renderDiaryStep() {
+  const log = ensureTodayLog();
+  if (!log.diary) log.diary = { good: '', challenge: '' };
+
+  const wrap = h('div', { class: 'step' });
+  wrap.appendChild(h('h2', { style: { color: 'var(--text)', fontSize: '1.25rem', margin: '4px 0 4px' } },
+    'One-sentence journal'));
+  wrap.appendChild(h('p', { class: 'small muted', style: { marginBottom: '12px' } },
+    `Optional. ${DIARY_CAP} chars each — keep it snappy.`));
+
+  wrap.appendChild(renderDiaryField(log.diary, 'good', 'One good thing', 'e.g. Coffee with Alex was lovely.'));
+  wrap.appendChild(renderDiaryField(log.diary, 'challenge', 'One challenge or learning', 'e.g. Struggled to focus after lunch.'));
+
+  return wrap;
+}
+
+function renderDiaryField(diary, key, label, placeholder) {
+  const wrap = h('div');
+  wrap.appendChild(h('label', label));
+  const ta = h('textarea', {
+    maxlength: DIARY_CAP, rows: 2, placeholder,
+    style: { minHeight: '64px' },
+  });
+  ta.value = diary[key] || '';
+  const counter = h('div', {
+    class: 'small muted',
+    style: { textAlign: 'right', marginTop: '2px' },
+  }, `${ta.value.length}/${DIARY_CAP}`);
+  ta.addEventListener('input', () => {
+    diary[key] = ta.value;
+    const len = ta.value.length;
+    counter.textContent = `${len}/${DIARY_CAP}`;
+    counter.style.color = len >= DIARY_CAP
+      ? 'var(--bad)'
+      : (len >= DIARY_CAP - 20 ? '#fbbf24' : 'var(--muted)');
+    save();
+  });
+  wrap.appendChild(ta);
+  wrap.appendChild(counter);
+  return wrap;
 }
 
 function renderMoodStep() {
@@ -1177,19 +2264,54 @@ function renderHabitCheckRow(habit) {
 function renderSummaryStep() {
   const log = ensureTodayLog();
   const wrap = h('div', { class: 'step center' });
-  const face = log.mood ? MOOD_OPTIONS.find((m) => m.value === log.mood) : null;
+  const moodFace = log.mood ? MOOD_OPTIONS.find((m) => m.value === log.mood) : null;
+  const sleepFace = log.sleep?.quality
+    ? SLEEP_FACES.find((s) => s.value === log.sleep.quality) : null;
   const habitCount = Object.keys(log.habits || {}).length;
   const doneCount = state.habits.filter(
     (ht) => !ht.archivedAt && isHabitDoneForDay(ht, currentDayKey()),
   ).length;
 
+  const faces = h('div', {
+    class: 'row', style: { justifyContent: 'center', gap: '28px', alignItems: 'flex-start' },
+  });
+  if (sleepFace) {
+    faces.appendChild(h('div', { style: { textAlign: 'center' } },
+      h('div', { class: 'mood' }, sleepFace.emoji),
+      h('div', { class: 'small muted' }, `sleep · ${sleepFace.caption}`),
+    ));
+  }
+  if (moodFace) {
+    faces.appendChild(h('div', { style: { textAlign: 'center' } },
+      h('div', { class: 'mood' }, moodFace.emoji),
+      h('div', { class: 'small muted' }, `mood · ${moodFace.caption}`),
+    ));
+  }
+  if (!sleepFace && !moodFace) {
+    faces.appendChild(h('div', { class: 'mood' }, '✨'));
+  }
+
   wrap.appendChild(h('div', { class: 'summary' },
-    h('div', { class: 'mood' }, face ? face.emoji : '✨'),
-    h('div', { style: { marginTop: '4px', color: 'var(--text)' } },
-      face ? face.caption : 'logged'),
+    faces,
     h('p', { class: 'small muted', style: { marginTop: '12px', marginBottom: 0 } },
       `${habitCount} habit${habitCount === 1 ? '' : 's'} logged · ${doneCount} on track today.`),
   ));
+
+  if (log.diary && (log.diary.good || log.diary.challenge)) {
+    const card = h('div', {
+      class: 'prompt-card',
+      style: { marginTop: '12px', textAlign: 'left' },
+    });
+    if (log.diary.good) {
+      card.appendChild(h('p', { style: { margin: '0 0 6px', color: 'var(--text)', lineHeight: 1.45 } },
+        h('span', { class: 'kicker' }, 'Good'), ' ', log.diary.good));
+    }
+    if (log.diary.challenge) {
+      card.appendChild(h('p', { style: { margin: 0, color: 'var(--text)', lineHeight: 1.45 } },
+        h('span', { class: 'kicker' }, 'Challenge'), ' ', log.diary.challenge));
+    }
+    wrap.appendChild(card);
+  }
 
   wrap.appendChild(h('p', { style: { marginTop: '16px' } },
     'Nice — see you tomorrow.'));
@@ -1245,6 +2367,8 @@ function showUpdateToast(reg) {
 
 function init() {
   wireTabbar();
+  wireGear();
+  reconcileCountdowns();
   render();
   registerSW();
   maybeOpenCheckIn();
