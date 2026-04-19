@@ -2,8 +2,8 @@
 // Body: { subscription, reminderTime: "HH:MM", timezone: IANA }
 // Stores or updates the subscription in KV, keyed by a hash of the endpoint.
 
-import { kv } from '@vercel/kv';
 import {
+  kv, kvGetJson, kvSetJson,
   endpointHash,
   readBody,
   isValidSubscription,
@@ -31,7 +31,7 @@ export default async function handler(req, res) {
   }
 
   const key = `sub:${endpointHash(subscription.endpoint)}`;
-  const existing = await kv.get(key);
+  const existing = await kvGetJson(key);
   const record = {
     endpoint: subscription.endpoint,
     keys: subscription.keys,
@@ -41,6 +41,6 @@ export default async function handler(req, res) {
     createdAt: existing?.createdAt ?? new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
-  await kv.set(key, record);
+  await kvSetJson(key, record);
   return res.status(200).json({ ok: true });
 }
