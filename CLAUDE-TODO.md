@@ -241,8 +241,8 @@ state.countdowns = [
 - [x] 16d. Settings copy explaining push vs in-app fallback
 
 ## Block 17 — Fast wins: undo + backup nudge
-- [ ] 17a. Extend `toast(message, { action, onAction, duration })` with inline action button
-- [ ] 17b. Undo for habit archive / soft-delete
-- [ ] 17c. Undo for countdown archive / delete
-- [ ] 17d. `settings.lastExportAt` timestamp on export
-- [ ] 17e. Monthly backup nudge banner on Settings
+- [x] 17a. Extend `toast(message, { action, onAction, duration })` with inline action button
+- [x] 17b. Undo for habit archive / soft-delete
+- [x] 17c. Undo for countdown archive / delete
+- [x] 17d. `settings.lastExportAt` timestamp on export
+- [x] 17e. Monthly backup nudge banner on Settings

@@ -12,6 +12,7 @@ const DEFAULT_STATE = {
   countdowns: [],
   settings: {
     rolloverHour: 3,
+    lastExportAt: null, // ISO timestamp of most recent JSON export
     reminder: {
       enabled: false,
       time: '09:00',
@@ -499,13 +500,31 @@ function svgEl(tag, attrs, ...children) {
 }
 
 let toastTimer = null;
-function toast(message, ms = 2000) {
+// toast('Saved')              — plain message, auto-dismiss in 2s
+// toast('Saved', 4000)        — custom duration
+// toast('Archived', { action:'Undo', onAction: fn })  — with inline action
+function toast(message, options = {}) {
+  if (typeof options === 'number') options = { ms: options };
+  const hasAction = !!(options.action && options.onAction);
+  const ms = options.ms ?? (hasAction ? 5000 : 2000);
+
   let el = qs('#toast');
   if (!el) {
     el = h('div', { id: 'toast', role: 'status', 'aria-live': 'polite' });
     document.body.appendChild(el);
   }
-  el.textContent = message;
+  el.replaceChildren();
+  el.appendChild(document.createTextNode(message));
+  if (hasAction) {
+    el.appendChild(h('button', {
+      type: 'button',
+      onClick: () => {
+        clearTimeout(toastTimer);
+        el.classList.remove('show');
+        try { options.onAction(); } catch (err) { console.error(err); }
+      },
+    }, options.action));
+  }
   el.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove('show'), ms);
@@ -1320,21 +1339,37 @@ function saveHabitDraft(draft, isNew) {
 function archiveHabit(id) {
   const habit = state.habits.find((x) => x.id === id);
   if (!habit) return;
+  const prev = habit.archivedAt;
   habit.archivedAt = new Date().toISOString();
   save();
   editingHabitId = null;
   render();
-  toast('Archived');
+  toast('Archived', {
+    action: 'Undo',
+    onAction: () => {
+      habit.archivedAt = prev;
+      save();
+      render();
+    },
+  });
 }
 
 function unarchiveHabit(id) {
   const habit = state.habits.find((x) => x.id === id);
   if (!habit) return;
+  const prev = habit.archivedAt;
   habit.archivedAt = null;
   save();
   editingHabitId = null;
   render();
-  toast('Unarchived');
+  toast('Unarchived', {
+    action: 'Undo',
+    onAction: () => {
+      habit.archivedAt = prev;
+      save();
+      render();
+    },
+  });
 }
 
 function deleteHabitConfirm(id) {
@@ -1342,6 +1377,14 @@ function deleteHabitConfirm(id) {
   if (!habit) return;
   const ok = confirm(`Delete "${habit.title}" and all its history permanently?`);
   if (!ok) return;
+
+  // Snapshot for undo
+  const snapshot = { habit: { ...habit }, history: {} };
+  for (const key of Object.keys(state.logs)) {
+    const val = state.logs[key]?.habits?.[id];
+    if (val !== undefined) snapshot.history[key] = val;
+  }
+
   state.habits = state.habits.filter((x) => x.id !== id);
   for (const key of Object.keys(state.logs)) {
     if (state.logs[key]?.habits) delete state.logs[key].habits[id];
@@ -1349,7 +1392,21 @@ function deleteHabitConfirm(id) {
   save();
   editingHabitId = null;
   render();
-  toast('Deleted');
+
+  toast('Deleted', {
+    action: 'Undo',
+    onAction: () => {
+      state.habits.push(snapshot.habit);
+      for (const [key, val] of Object.entries(snapshot.history)) {
+        const log = state.logs[key];
+        if (!log) continue;
+        if (!log.habits) log.habits = {};
+        log.habits[id] = val;
+      }
+      save();
+      render();
+    },
+  });
 }
 
 // ---- Diary tab --------------------------------------------------------------
@@ -1709,32 +1766,44 @@ function saveCountdownDraft(draft, isNew) {
 function archiveCountdown(id) {
   const c = state.countdowns.find((x) => x.id === id);
   if (!c) return;
+  const prev = c.archivedAt;
   c.archivedAt = new Date().toISOString();
   save();
   editingCountdownId = null;
   render();
-  toast('Archived');
+  toast('Archived', {
+    action: 'Undo',
+    onAction: () => { c.archivedAt = prev; save(); render(); },
+  });
 }
 
 function unarchiveCountdown(id) {
   const c = state.countdowns.find((x) => x.id === id);
   if (!c) return;
+  const prev = c.archivedAt;
   c.archivedAt = null;
   save();
   editingCountdownId = null;
   render();
-  toast('Unarchived');
+  toast('Unarchived', {
+    action: 'Undo',
+    onAction: () => { c.archivedAt = prev; save(); render(); },
+  });
 }
 
 function deleteCountdownConfirm(id) {
   const c = state.countdowns.find((x) => x.id === id);
   if (!c) return;
   if (!confirm(`Delete "${c.title}"?`)) return;
+  const snapshot = { ...c };
   state.countdowns = state.countdowns.filter((x) => x.id !== id);
   save();
   editingCountdownId = null;
   render();
-  toast('Deleted');
+  toast('Deleted', {
+    action: 'Undo',
+    onAction: () => { state.countdowns.push(snapshot); save(); render(); },
+  });
 }
 
 // ---- "At a glance" Wrapped-style modal --------------------------------------
@@ -2637,6 +2706,10 @@ function renderSettings() {
   const view = h('div', { class: 'view' });
   view.appendChild(h('h1', 'Settings'));
 
+  // --- Backup nudge (shows if data exists and no export in 30 days) ---
+  const nudge = renderBackupNudge();
+  if (nudge) view.appendChild(nudge);
+
   // --- Day rollover ---
   view.appendChild(h('h2', { style: { marginTop: '20px' } }, 'Day rollover'));
   view.appendChild(h('p', { class: 'small muted' },
@@ -2722,11 +2795,50 @@ function exportJSON() {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+    state.settings.lastExportAt = new Date().toISOString();
+    save();
+    render();
     toast('Exported');
   } catch (err) {
     console.error(err);
     toast('Export failed');
   }
+}
+
+function shouldNudgeBackup() {
+  const last = state.settings.lastExportAt;
+  // If the user has no meaningful data yet, don't nag.
+  const hasData = state.habits.length > 0 || Object.keys(state.logs).length > 0 || state.countdowns.length > 0;
+  if (!hasData) return false;
+  if (!last) return true;
+  const thirtyDays = 30 * 24 * 3600 * 1000;
+  return Date.now() - new Date(last).getTime() > thirtyDays;
+}
+
+function daysSince(iso) {
+  return Math.floor((Date.now() - new Date(iso).getTime()) / (24 * 3600 * 1000));
+}
+
+function renderBackupNudge() {
+  if (!shouldNudgeBackup()) return null;
+  const last = state.settings.lastExportAt;
+  const sub = last
+    ? `Last export ${daysSince(last)} days ago. Browsers can clear local data.`
+    : "You haven't exported yet. Browsers can clear local data.";
+  return h('div', {
+    class: 'reminder-banner',
+    style: { marginBottom: '16px' },
+  },
+    h('div', null,
+      h('div', { style: { fontWeight: 600 } }, 'Back up your data'),
+      h('div', { class: 'small muted' }, sub),
+    ),
+    h('button', {
+      class: 'ghost small',
+      style: { minHeight: '32px', padding: '6px 12px' },
+      onClick: exportJSON,
+    }, 'Export now'),
+  );
 }
 
 function handleImport(file) {
