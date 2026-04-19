@@ -3,9 +3,37 @@
 import { createHash } from 'node:crypto';
 import { Redis } from '@upstash/redis';
 
-// Read UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN (auto-populated by the
-// Vercel/Upstash integration). One shared client per cold start.
-export const kv = Redis.fromEnv();
+// The Vercel/Upstash Marketplace integration namespaces env vars with the
+// store name (e.g. "tempostorage_KV_REST_API_URL"). Accept either the
+// canonical names or any suffix-matching prefixed variant.
+function findEnv(suffixes, excludeContains = []) {
+  // Exact matches first.
+  for (const name of suffixes) {
+    if (process.env[name]) return process.env[name];
+  }
+  // Then anything whose key ends with one of the expected suffixes.
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!value) continue;
+    if (excludeContains.some((x) => key.includes(x))) continue;
+    if (suffixes.some((s) => key.endsWith(s))) return value;
+  }
+  return '';
+}
+
+const redisUrl = findEnv(['UPSTASH_REDIS_REST_URL', 'KV_REST_API_URL']);
+const redisToken = findEnv(
+  ['UPSTASH_REDIS_REST_TOKEN', 'KV_REST_API_TOKEN'],
+  ['READ_ONLY'],
+);
+
+if (!redisUrl || !redisToken) {
+  console.error(
+    'Redis env vars missing. Available KV/UPSTASH/REDIS keys:',
+    Object.keys(process.env).filter((k) => /KV|UPSTASH|REDIS/i.test(k)).join(', ') || '(none)',
+  );
+}
+
+export const kv = new Redis({ url: redisUrl, token: redisToken });
 
 // Upstash auto-serialises objects, but cold-starts occasionally return a raw
 // string. Tolerate both forms so callers always see a parsed record.
