@@ -66,3 +66,80 @@ Working task list for the Tempo habit + mood PWA, broken into small chunks so ea
 3. Pushes to origin.
 4. Updates this file to tick the box, commits+pushes the tick.
 5. Returns to user for the "go next" prompt.
+
+---
+
+# Phase 2 — Reports, Diary, Countdowns, Sleep
+
+**Branch:** `feat/phase-2`
+
+**Decisions locked:**
+- Tabs: **Diary · Habits · Today · Countdowns · Reports** (Today centered)
+- Settings moves to a **gear icon in the header** (accessible from every view)
+- Check-in step order: Sleep → Mood → Prompt → Habits → Diary → Summary (6 steps, all skippable)
+- Sleep: 5-face quality picker + optional hours (number)
+- Diary: two 140-char entries per day (`good`, `challenge`) with live char counter
+- Countdowns: CSS gradient/pattern themes (no bundled images), auto-archive 24h after target, recurring `annual` flag for birthdays
+- Next 1 countdown shown as a strip on the Today view
+- Reports: line charts for mood + sleep + habit completion rate (%), with Week / Month toggle (default Week); per-habit "success-over-time" heatmap for tick habits, line graph for count/percent habits
+
+**Data model additions (back-compat):**
+```
+logs[dayKey] = {
+  ...existing,
+  sleep: { quality: 1–5, hours: number|null } | null,
+  diary: { good: string, challenge: string } | null,
+  steps: { mood, prompt, habits, sleep, diary },  // extended
+}
+
+state.countdowns = [
+  { id, title, description, target: ISO, theme: string,
+    recurring: 'annual' | null, archivedAt: ISO | null, createdAt: ISO }
+]
+```
+
+## Block 6 — Data model + nav restructure
+- [ ] 6a. Extend log model (sleep, diary) + back-compat migration in `ensureTodayLog` / `load`
+- [ ] 6b. Add `countdowns: []` to default state, wire migration in `load`
+- [ ] 6c. Refactor `index.html` tabbar to 5 tabs (Diary / Habits / Today / Countdowns / Reports), add gear icon slot
+- [ ] 6d. Update `ROUTES`, `go()`, `render()` for new routes; move Settings out of tabbar; gear icon handler opens Settings route
+
+## Block 7 — Check-in: Sleep + Diary steps
+- [ ] 7a. Sleep step: 5-face quality picker + optional hours input
+- [ ] 7b. Diary step: two textareas with live 140-char counters
+- [ ] 7c. Extend `nextIncompleteStep` + progress bar (6 dashes)
+- [ ] 7d. Re-order flow to Sleep → Mood → Prompt → Habits → Diary → Summary
+- [ ] 7e. Extend summary screen to surface sleep quality + diary snippets
+
+## Block 8 — Diary tab
+- [ ] 8a. `renderDiary` route + list header
+- [ ] 8b. Timeline cards (date + good + challenge, newest first)
+- [ ] 8c. Empty state copy + CTA to start a check-in
+
+## Block 9 — Countdowns data + themes
+- [ ] 9a. Countdown helpers (uid, sort by target, expiry check, annual-bump)
+- [ ] 9b. ~16 CSS gradient/pattern theme presets (sunset, ocean, confetti, snowfall, neon, mono, nature, polka…)
+- [ ] 9c. Time-remaining formatter (`7d 3h`, `today`, `🎉 happened`, `archived`)
+
+## Block 10 — Countdowns tab
+- [ ] 10a. Countdowns list view: upcoming sorted soonest-first, archived collapsed below
+- [ ] 10b. Themed tile component (background from theme preset, title, remaining time)
+- [ ] 10c. Edit form: title, description, date/time OR "days from now", theme picker, annual toggle
+- [ ] 10d. Save / archive / delete + annual auto-bump on render if past
+- [ ] 10e. Today-view peek: top upcoming countdown strip above habits
+
+## Block 11 — Reports tab
+- [ ] 11a. `renderReports` + sub-tab nav (Overview / Mood / Sleep / Habits)
+- [ ] 11b. Week / Month toggle (state scoped to Reports)
+- [ ] 11c. SVG line-chart helper (axes, dots, line, week/month x-labels, 1–5 y-scale)
+- [ ] 11d. Overview: mood + sleep + completion-rate lines on one chart
+- [ ] 11e. Mood sub-tab: dedicated chart + min/avg/max pills
+- [ ] 11f. Sleep sub-tab: dedicated chart (quality + hours overlay if hours logged)
+- [ ] 11g. Habits sub-tab: per-habit view (reuse heatmap for tick, line for count/percent with target line)
+
+## Block 12 — Polish
+- [ ] 12a. Gear icon a11y + focus-visible
+- [ ] 12b. Empty states for Diary, Countdowns, Reports
+- [ ] 12c. Diary char counters (e.g. `112/140`, red at >= 140)
+- [ ] 12d. Mobile: 5-tab spacing audit, label sizing
+- [ ] 12e. End-to-end smoke test + commit + deploy notes
