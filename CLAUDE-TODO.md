@@ -207,3 +207,87 @@ state.countdowns = [
 3. Push.
 4. Tick the box in this file; commit + push the tick.
 5. Return for next "go".
+
+---
+
+# Phase 4 — Real push notifications (Vercel serverless + GitHub Actions cron)
+
+**Branch:** `feat/phase-4` (branch off `main` when building)
+
+**External setup (already done):**
+- Upstash Redis connected via Vercel (KV_* env vars auto-populated)
+- VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT, TICK_SECRET in Vercel env vars
+- TICK_SECRET added to GitHub repo secrets
+
+**Architecture:**
+- 3 Vercel serverless routes: `POST /api/subscribe`, `POST /api/unsubscribe`, `GET /api/tick`
+- Storage: Upstash Redis via `@vercel/kv` SDK (one record per device endpoint)
+- Push signing: `web-push` npm package + VAPID keys in env
+- Scheduler: GitHub Actions cron every 15 min → `GET /api/tick?secret=<TICK_SECRET>`
+- Timezone-aware: each subscription stores IANA tz; tick checks "is user's local clock within ±7 min of their reminderTime?"
+- Dedup: each subscription stores `lastSentDay` (YYYY-MM-DD); skip if already fired today
+- Cleanup: push returns 410 Gone → delete that sub
+- Privacy: no user IDs — subscription is keyed by opaque browser endpoint
+- Coexists with Phase 3 Block 16 in-app nudge (that's the fallback when push isn't granted)
+
+**KV schema:**
+```
+sub:<endpointHash> → {
+  endpoint,
+  keys: { p256dh, auth },
+  reminderTime: "HH:MM",
+  timezone: "Australia/Sydney",
+  lastSentDay: "2026-04-19",
+  createdAt: ISO,
+}
+```
+
+**Settings schema (client, localStorage):**
+```
+settings.reminder = {
+  enabled: boolean,
+  time: "HH:MM",
+  timezone: IANA,
+  permission: 'default' | 'granted' | 'denied',
+  endpoint: string | null,   // last successful subscription
+}
+```
+
+## Block 18 — Backend setup
+- [ ] 18a. Add `package.json` + dev-deps: `web-push`, `@vercel/kv`
+- [ ] 18b. `/api/subscribe.js` — POST handler: validate body, derive endpointHash, upsert sub in KV
+- [ ] 18c. `/api/unsubscribe.js` — POST handler: remove sub by endpoint
+- [ ] 18d. `/api/tick.js` — GET handler: verify TICK_SECRET, scan `sub:*`, filter due (timezone + ±7-min window + dedup), send via web-push, delete 410s
+- [ ] 18e. Add `/api/vapid-public.js` — GET returning `VAPID_PUBLIC_KEY` so the client can fetch it (avoids hardcoding)
+
+## Block 19 — Service worker push + click handlers
+- [ ] 19a. `push` event listener: parse JSON payload `{ title, body, url }` → `registration.showNotification`
+- [ ] 19b. `notificationclick` listener: focus existing client tab if open, else open new; navigate to check-in modal
+- [ ] 19c. `pushsubscriptionchange` listener: re-subscribe on backend when browser rotates keys
+- [ ] 19d. Bump SW `VERSION` so the new handlers activate after deploy
+
+## Block 20 — Client subscribe helpers
+- [ ] 20a. Client fetches `VAPID_PUBLIC_KEY` from `/api/vapid-public` on first subscribe attempt (caches in `settings.reminder`)
+- [ ] 20b. `requestNotificationPermission()` helper — handles `default` / `granted` / `denied`
+- [ ] 20c. `subscribeToPush(reminderTime, timezone)` helper — calls `pushManager.subscribe` + POSTs to `/api/subscribe`
+- [ ] 20d. `unsubscribeFromPush()` helper — calls `subscription.unsubscribe` + POSTs to `/api/unsubscribe`
+- [ ] 20e. `urlBase64ToUint8Array` utility for converting VAPID public key
+
+## Block 21 — Settings UI: Daily reminders
+- [ ] 21a. Extend `DEFAULT_STATE.settings` with `reminder` object; back-compat in `load()`
+- [ ] 21b. Settings section: "Daily reminders" — toggle, `<input type="time">`, local-timezone readout, device status
+- [ ] 21c. Toggle ON flow: permission → subscribe → POST `/api/subscribe` → persist `endpoint` locally → confirm toast
+- [ ] 21d. Toggle OFF flow: `subscription.unsubscribe` → POST `/api/unsubscribe` → clear local `endpoint`
+- [ ] 21e. Error / status states: `denied`, `unsupported`, `pending`, `connected`, plus a re-sync button for the "connected on this device" case
+
+## Block 22 — GitHub Actions cron + end-to-end test
+- [ ] 22a. `.github/workflows/reminder-tick.yml` — schedule `*/15 * * * *`, curl `/api/tick` with secret header
+- [ ] 22b. Trigger the cron manually once via `workflow_dispatch` to verify auth + KV + web-push path
+- [ ] 22c. E2E on phone: subscribe → set reminder → wait → receive push → tap → app opens to check-in. Remove `generate-vapid.yml` after keys are safe.
+
+## Block 23 — Polish
+- [ ] 23a. Dedup in `/api/tick` (compare `lastSentDay` to user's current local date)
+- [ ] 23b. 410/404 cleanup in `/api/tick` (delete dead subs)
+- [ ] 23c. Simple rate-limit on `/api/subscribe` (per-IP token bucket in KV) to avoid abuse
+- [ ] 23d. Settings copy: platform caveats ("Android: install to home screen for best reliability; iOS: requires 16.4+ and installed PWA")
+- [ ] 23e. Server-side logging via `console.log` so Vercel function logs show what was sent / skipped each tick
