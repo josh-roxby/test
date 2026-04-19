@@ -43,6 +43,38 @@ function save() {
 
 let state = load();
 
+// ---- Constants --------------------------------------------------------------
+
+const PALETTE = [
+  '#7c9cff', '#8ad1ff', '#5eead4', '#86efac',
+  '#fde047', '#fbbf24', '#fb923c', '#f87171',
+  '#f472b6', '#c084fc', '#a78bfa', '#94a3b8',
+];
+
+const HABIT_TYPES = [
+  { id: 'tick',    label: 'Tick',    hint: 'Did or didn\'t' },
+  { id: 'count',   label: 'Count',   hint: 'e.g. 4 walks' },
+  { id: 'percent', label: 'Percent', hint: '0–100%' },
+];
+
+function uid() {
+  return 'h_' + Math.random().toString(36).slice(2, 10);
+}
+
+function habitMeta(habit) {
+  if (habit.type === 'tick') {
+    return habit.kind === 'good' ? 'Daily tick' : 'Avoid daily';
+  }
+  if (habit.type === 'count') {
+    const unit = habit.unit ? ' ' + habit.unit : '';
+    return `${habit.kind === 'good' ? 'Target' : 'Limit'}: ${habit.target}${unit}`;
+  }
+  if (habit.type === 'percent') {
+    return `${habit.kind === 'good' ? 'Target' : 'Limit'}: ${habit.target}%`;
+  }
+  return '';
+}
+
 // ---- Day helpers ------------------------------------------------------------
 
 function pad2(n) {
@@ -179,11 +211,297 @@ function renderHome() {
   );
 }
 
+// ---- Manage: list + edit ----------------------------------------------------
+
+// null = list view; 'new' = new-habit form; '<id>' = edit form for that habit.
+let editingHabitId = null;
+
+function startNewHabit() { editingHabitId = 'new'; render(); }
+function startEditHabit(id) { editingHabitId = id; render(); }
+function cancelEdit() { editingHabitId = null; render(); }
+
 function renderManage() {
-  return h('div', { class: 'view' },
+  if (editingHabitId !== null) return renderHabitEdit();
+
+  const view = h('div', { class: 'view' });
+
+  view.appendChild(h('div', { class: 'row between', style: { marginBottom: '8px' } },
     h('h1', 'Habits'),
-    h('p', 'Manage view — coming soon. You\'ll add, edit, and archive habits here.'),
+    h('button', { class: 'primary', onClick: startNewHabit }, '+ New'),
+  ));
+
+  const active = state.habits.filter((x) => !x.archivedAt);
+  const archived = state.habits.filter((x) => x.archivedAt);
+
+  if (active.length === 0 && archived.length === 0) {
+    view.appendChild(h('div', { class: 'stack', style: { marginTop: '24px' } },
+      h('p', 'No habits yet. Tap "+ New" to add one.'),
+      h('p', { class: 'small muted' },
+        'Good habits you want to build (like "Morning walk") and bad habits you want to break (like "Doomscrolling") both live here.'),
+    ));
+    return view;
+  }
+
+  const good = active.filter((x) => x.kind === 'good');
+  const bad = active.filter((x) => x.kind === 'bad');
+
+  if (good.length) view.appendChild(renderManageSection('Build', 'good', good));
+  if (bad.length)  view.appendChild(renderManageSection('Break', 'bad', bad));
+  if (archived.length) view.appendChild(renderManageSection('Archived', '', archived));
+
+  return view;
+}
+
+function renderManageSection(title, kindClass, habits) {
+  return h('section', { class: 'section' },
+    h('div', { class: `section-head ${kindClass}` },
+      h('span', { class: 'dot' }),
+      title,
+    ),
+    h('div', { class: 'habit-list' },
+      habits.map((habit) => renderManageHabitCard(habit)),
+    ),
   );
+}
+
+function renderManageHabitCard(habit) {
+  return h('div', {
+      class: `habit ${habit.kind}${habit.archivedAt ? ' archived' : ''}`,
+      style: { '--habit-color': habit.color },
+      onClick: () => startEditHabit(habit.id),
+      role: 'button',
+      tabindex: '0',
+    },
+    h('div', { class: 'stripe' }),
+    h('div', null,
+      h('div', { class: 'title' }, habit.title),
+      h('div', { class: 'meta' }, habitMeta(habit)),
+    ),
+    h('div', { class: 'state' }, '›'),
+  );
+}
+
+function renderSegmented(options, value, onChange) {
+  const seg = h('div', { class: 'segmented' });
+  let current = value;
+  function paint() {
+    seg.replaceChildren();
+    options.forEach((opt) => {
+      const btn = h('button', {
+        class: current === opt.id ? 'on' : '',
+        onClick: () => { current = opt.id; paint(); onChange(opt.id); },
+        type: 'button',
+      }, opt.label);
+      seg.appendChild(btn);
+    });
+  }
+  paint();
+  return seg;
+}
+
+function renderHabitEdit() {
+  const isNew = editingHabitId === 'new';
+  const existing = isNew ? null : state.habits.find((x) => x.id === editingHabitId);
+  if (!isNew && !existing) {
+    editingHabitId = null;
+    return renderManage();
+  }
+
+  const draft = isNew ? {
+    id: uid(),
+    title: '',
+    description: '',
+    kind: 'good',
+    type: 'tick',
+    target: 1,
+    unit: '',
+    color: PALETTE[0],
+    createdAt: new Date().toISOString(),
+    archivedAt: null,
+  } : { ...existing };
+
+  const view = h('div', { class: 'view' });
+
+  view.appendChild(h('div', { class: 'row between', style: { marginBottom: '8px' } },
+    h('button', { class: 'ghost', onClick: cancelEdit }, '← Back'),
+    h('h1', { style: { fontSize: '1.15rem' } }, isNew ? 'New habit' : 'Edit habit'),
+    h('span', { style: { width: '64px' } }),
+  ));
+
+  // Title
+  view.appendChild(h('label', 'Title'));
+  const titleInput = h('input', {
+    type: 'text', maxlength: 60, placeholder: 'Morning walk',
+  });
+  titleInput.value = draft.title;
+  titleInput.addEventListener('input', () => { draft.title = titleInput.value; });
+  view.appendChild(titleInput);
+
+  // Description
+  view.appendChild(h('label', 'Description (optional)'));
+  const descInput = h('textarea', {
+    maxlength: 400, placeholder: 'Why does this matter to you?',
+  });
+  descInput.value = draft.description;
+  descInput.addEventListener('input', () => { draft.description = descInput.value; });
+  view.appendChild(descInput);
+
+  // Kind (good / bad)
+  view.appendChild(h('label', 'Kind'));
+  view.appendChild(renderSegmented(
+    [
+      { id: 'good', label: 'Build (good)' },
+      { id: 'bad',  label: 'Break (bad)'  },
+    ],
+    draft.kind,
+    (v) => { draft.kind = v; },
+  ));
+
+  // Qty type
+  view.appendChild(h('label', 'Tracking'));
+  const targetContainer = h('div', { class: 'stack' });
+  view.appendChild(renderSegmented(
+    HABIT_TYPES.map((t) => ({ id: t.id, label: t.label })),
+    draft.type,
+    (v) => { draft.type = v; refreshTargetFields(); },
+  ));
+  view.appendChild(targetContainer);
+
+  function refreshTargetFields() {
+    targetContainer.replaceChildren();
+
+    if (draft.type === 'count') {
+      if (!draft.target || draft.target < 1) draft.target = 1;
+      targetContainer.appendChild(h('label', 'Target count + unit'));
+      const row = h('div', { class: 'row', style: { gap: '8px' } });
+      const targetIn = h('input', { type: 'number', min: 1, step: 1, inputmode: 'numeric', style: 'flex:1' });
+      targetIn.value = draft.target;
+      targetIn.addEventListener('input', () => {
+        draft.target = Math.max(1, Number(targetIn.value) || 1);
+      });
+      const unitIn = h('input', { type: 'text', maxlength: 16, placeholder: 'walks', style: 'flex:1' });
+      unitIn.value = draft.unit || '';
+      unitIn.addEventListener('input', () => { draft.unit = unitIn.value; });
+      row.appendChild(targetIn);
+      row.appendChild(unitIn);
+      targetContainer.appendChild(row);
+    } else if (draft.type === 'percent') {
+      if (!draft.target || draft.target < 1 || draft.target > 100) draft.target = 100;
+      targetContainer.appendChild(h('label', 'Target percentage (1–100)'));
+      const targetIn = h('input', { type: 'number', min: 1, max: 100, step: 1, inputmode: 'numeric' });
+      targetIn.value = draft.target;
+      targetIn.addEventListener('input', () => {
+        const n = Number(targetIn.value) || 100;
+        draft.target = Math.min(100, Math.max(1, n));
+      });
+      targetContainer.appendChild(targetIn);
+    } else {
+      targetContainer.appendChild(h('p', { class: 'small muted', style: { margin: '4px 2px 0' } },
+        'Tick tracks whether you did it today — no target needed.'));
+    }
+  }
+  refreshTargetFields();
+
+  // Color palette
+  view.appendChild(h('label', 'Color'));
+  const palette = h('div', { class: 'palette' });
+  function paintPalette() {
+    palette.replaceChildren();
+    PALETTE.forEach((color) => {
+      palette.appendChild(h('div', {
+        class: 'swatch' + (color === draft.color ? ' selected' : ''),
+        style: { background: color },
+        role: 'button',
+        'aria-label': `Color ${color}`,
+        tabindex: '0',
+        onClick: () => { draft.color = color; paintPalette(); },
+      }));
+    });
+  }
+  paintPalette();
+  view.appendChild(palette);
+
+  // Actions
+  const actions = h('div', { class: 'stack', style: { marginTop: '24px' } });
+  actions.appendChild(h('button', {
+    class: 'primary block',
+    onClick: () => saveHabitDraft(draft, isNew),
+  }, 'Save'));
+
+  if (!isNew) {
+    if (existing.archivedAt) {
+      actions.appendChild(h('button', {
+        class: 'block ghost',
+        onClick: () => unarchiveHabit(existing.id),
+      }, 'Unarchive'));
+    } else {
+      actions.appendChild(h('button', {
+        class: 'block ghost',
+        onClick: () => archiveHabit(existing.id),
+      }, 'Archive'));
+    }
+    actions.appendChild(h('button', {
+      class: 'block danger',
+      onClick: () => deleteHabitConfirm(existing.id),
+    }, 'Delete permanently'));
+  }
+  view.appendChild(actions);
+
+  return view;
+}
+
+function saveHabitDraft(draft, isNew) {
+  const title = draft.title.trim();
+  if (!title) { toast('Please enter a title'); return; }
+  draft.title = title;
+  draft.description = (draft.description || '').trim();
+  if (draft.type !== 'count') draft.unit = '';
+
+  if (isNew) {
+    state.habits.push(draft);
+  } else {
+    const i = state.habits.findIndex((x) => x.id === draft.id);
+    if (i >= 0) state.habits[i] = draft;
+  }
+  save();
+  editingHabitId = null;
+  render();
+  toast(isNew ? 'Habit added' : 'Saved');
+}
+
+function archiveHabit(id) {
+  const habit = state.habits.find((x) => x.id === id);
+  if (!habit) return;
+  habit.archivedAt = new Date().toISOString();
+  save();
+  editingHabitId = null;
+  render();
+  toast('Archived');
+}
+
+function unarchiveHabit(id) {
+  const habit = state.habits.find((x) => x.id === id);
+  if (!habit) return;
+  habit.archivedAt = null;
+  save();
+  editingHabitId = null;
+  render();
+  toast('Unarchived');
+}
+
+function deleteHabitConfirm(id) {
+  const habit = state.habits.find((x) => x.id === id);
+  if (!habit) return;
+  const ok = confirm(`Delete "${habit.title}" and all its history permanently?`);
+  if (!ok) return;
+  state.habits = state.habits.filter((x) => x.id !== id);
+  for (const key of Object.keys(state.logs)) {
+    if (state.logs[key]?.habits) delete state.logs[key].habits[id];
+  }
+  save();
+  editingHabitId = null;
+  render();
+  toast('Deleted');
 }
 
 function renderSettings() {

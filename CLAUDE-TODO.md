@@ -30,11 +30,11 @@ Working task list for the Tempo habit + mood PWA, broken into small chunks so ea
 - [x] 1f. `service-worker.js` (cache-first shell) + registration in `app.js`
 
 ## Block 2 — Habits CRUD
-- [ ] 2a. Manage list view: empty state + habit card list
-- [ ] 2b. Edit form shell: title, description, good/bad segmented
-- [ ] 2c. Edit form qty type: tick/count/percent segmented + target + unit fields
-- [ ] 2d. Color palette picker
-- [ ] 2e. Save / archive / delete actions wired to state
+- [x] 2a. Manage list view: empty state + habit card list
+- [x] 2b. Edit form shell: title, description, good/bad segmented
+- [x] 2c. Edit form qty type: tick/count/percent segmented + target + unit fields
+- [x] 2d. Color palette picker
+- [x] 2e. Save / archive / delete actions wired to state
 
 ## Block 3 — Home + heatmaps
 - [ ] 3a. Home view layout: Build + Break sections, habit rows
