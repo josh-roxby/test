@@ -1,0 +1,27 @@
+name: Generate VAPID keys (one-shot)
+
+# Run this manually from the Actions tab to print a fresh VAPID keypair into
+# the job log. Copy the public and private keys into Vercel env vars, then
+# delete this workflow file (or keep it for future key rotation).
+
+on:
+  workflow_dispatch:
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Generate VAPID keys
+        run: |
+          echo "=========================================="
+          echo "Copy these into Vercel env vars:"
+          echo "  VAPID_PUBLIC_KEY  = <public key below>"
+          echo "  VAPID_PRIVATE_KEY = <private key below>"
+          echo "=========================================="
+          npx --yes web-push generate-vapid-keys
+          echo "=========================================="
