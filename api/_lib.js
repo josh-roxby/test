@@ -1,6 +1,27 @@
 // Shared helpers for API routes.
 
 import { createHash } from 'node:crypto';
+import { Redis } from '@upstash/redis';
+
+// Read UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN (auto-populated by the
+// Vercel/Upstash integration). One shared client per cold start.
+export const kv = Redis.fromEnv();
+
+// Upstash auto-serialises objects, but cold-starts occasionally return a raw
+// string. Tolerate both forms so callers always see a parsed record.
+export async function kvGetJson(key) {
+  const raw = await kv.get(key);
+  if (raw == null) return null;
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw); } catch { return null; }
+  }
+  return raw;
+}
+
+export async function kvSetJson(key, value) {
+  // Stringify explicitly so stored shape is predictable across SDK versions.
+  await kv.set(key, JSON.stringify(value));
+}
 
 export function endpointHash(endpoint) {
   return createHash('sha256').update(endpoint).digest('hex').slice(0, 32);

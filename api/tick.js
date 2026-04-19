@@ -4,9 +4,8 @@
 // falls within ±7 minutes of their reminderTime and who haven't been sent
 // one today (per their local timezone).
 
-import { kv } from '@vercel/kv';
 import webpush from 'web-push';
-import { nowInTimezone, withinMinutes } from './_lib.js';
+import { kv, kvGetJson, kvSetJson, nowInTimezone, withinMinutes } from './_lib.js';
 
 const WINDOW_MINUTES = 7;
 
@@ -34,7 +33,7 @@ export default async function handler(req, res) {
   result.checked = keys.length;
 
   for (const key of keys) {
-    const sub = await kv.get(key);
+    const sub = await kvGetJson(key);
     if (!sub) continue;
 
     let local;
@@ -57,7 +56,7 @@ export default async function handler(req, res) {
 
     try {
       await webpush.sendNotification({ endpoint: sub.endpoint, keys: sub.keys }, payload);
-      await kv.set(key, { ...sub, lastSentDay: local.ymd });
+      await kvSetJson(key, { ...sub, lastSentDay: local.ymd });
       result.sent++;
     } catch (err) {
       if (err?.statusCode === 410 || err?.statusCode === 404) {

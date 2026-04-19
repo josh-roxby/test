@@ -2,8 +2,7 @@
 // Body: { endpoint: string }
 // Deletes the subscription for this endpoint if present.
 
-import { kv } from '@vercel/kv';
-import { endpointHash, readBody } from './_lib.js';
+import { kv, endpointHash, readBody } from './_lib.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {

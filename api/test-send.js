@@ -3,9 +3,8 @@
 // Looks up the subscription for this endpoint and fires an immediate test push.
 // Used by the Settings "Test notification" panel to verify the stack end-to-end.
 
-import { kv } from '@vercel/kv';
 import webpush from 'web-push';
-import { endpointHash, readBody } from './_lib.js';
+import { kv, kvGetJson, endpointHash, readBody } from './_lib.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -18,7 +17,7 @@ export default async function handler(req, res) {
   }
 
   const key = `sub:${endpointHash(body.endpoint)}`;
-  const sub = await kv.get(key);
+  const sub = await kvGetJson(key);
   if (!sub) return res.status(404).json({ error: 'subscription not found' });
 
   if (!process.env.VAPID_PRIVATE_KEY || !process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_SUBJECT) {
