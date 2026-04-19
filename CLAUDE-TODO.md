@@ -99,10 +99,10 @@ state.countdowns = [
 ```
 
 ## Block 6 — Data model + nav restructure
-- [ ] 6a. Extend log model (sleep, diary) + back-compat migration in `ensureTodayLog` / `load`
-- [ ] 6b. Add `countdowns: []` to default state, wire migration in `load`
-- [ ] 6c. Refactor `index.html` tabbar to 5 tabs (Diary / Habits / Today / Countdowns / Reports), add gear icon slot
-- [ ] 6d. Update `ROUTES`, `go()`, `render()` for new routes; move Settings out of tabbar; gear icon handler opens Settings route
+- [x] 6a. Extend log model (sleep, diary) + back-compat migration in `ensureTodayLog` / `load`
+- [x] 6b. Add `countdowns: []` to default state, wire migration in `load`
+- [x] 6c. Refactor `index.html` tabbar to 5 tabs (Diary / Habits / Today / Countdowns / Reports), add gear icon slot
+- [x] 6d. Update `ROUTES`, `go()`, `render()` for new routes; move Settings out of tabbar; gear icon handler opens Settings route
 
 ## Block 7 — Check-in: Sleep + Diary steps
 - [ ] 7a. Sleep step: 5-face quality picker + optional hours input

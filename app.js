@@ -9,6 +9,7 @@ const DEFAULT_STATE = {
   version: 1,
   habits: [],
   logs: {},
+  countdowns: [],
   settings: {
     rolloverHour: 3,
   },
@@ -184,14 +185,20 @@ function ensureTodayLog() {
         ? PROMPTS[seed % PROMPTS.length]
         : FACTS[seed % FACTS.length],
       habits: {},
-      steps: { mood: false, prompt: false, habits: false },
+      sleep: null,                                 // { quality:1–5, hours:number|null }
+      diary: null,                                 // { good:string, challenge:string }
+      steps: { mood: false, prompt: false, habits: false, sleep: false, diary: false },
       completedAt: null,
     };
   } else {
-    // Backfill shape for older logs so steps check is safe.
+    // Backfill shape for older logs so future reads are safe.
     const log = state.logs[key];
     if (!log.steps) log.steps = { mood: !!log.mood, prompt: false, habits: false };
+    if (log.steps.sleep === undefined) log.steps.sleep = false;
+    if (log.steps.diary === undefined) log.steps.diary = false;
     if (!log.habits) log.habits = {};
+    if (log.sleep === undefined) log.sleep = null;
+    if (log.diary === undefined) log.diary = null;
     if (log.promptText == null) {
       const seed = strHash(key);
       const isReflect = seed % 2 === 0;
@@ -320,7 +327,9 @@ function toast(message, ms = 2000) {
 
 // ---- Router -----------------------------------------------------------------
 
-const ROUTES = new Set(['home', 'manage', 'settings']);
+const ROUTES = new Set([
+  'home', 'habits', 'diary', 'countdowns', 'reports', 'settings',
+]);
 let route = 'home';
 
 function go(next) {
@@ -332,10 +341,14 @@ function go(next) {
 function render() {
   const app = qs('#app');
   app.replaceChildren();
-  if (route === 'manage') app.appendChild(renderManage());
+  if (route === 'habits') app.appendChild(renderManage());
+  else if (route === 'diary') app.appendChild(renderDiary());
+  else if (route === 'countdowns') app.appendChild(renderCountdowns());
+  else if (route === 'reports') app.appendChild(renderReports());
   else if (route === 'settings') app.appendChild(renderSettings());
   else app.appendChild(renderHome());
   updateTabbar();
+  updateGear();
 }
 
 function updateTabbar() {
@@ -349,6 +362,20 @@ function updateTabbar() {
 function wireTabbar() {
   qsa('#tabbar .tab').forEach((btn) => {
     btn.addEventListener('click', () => go(btn.dataset.route));
+  });
+}
+
+function updateGear() {
+  const gear = qs('#gear');
+  if (!gear) return;
+  gear.classList.toggle('active', route === 'settings');
+}
+
+function wireGear() {
+  const gear = qs('#gear');
+  if (!gear) return;
+  gear.addEventListener('click', () => {
+    go(route === 'settings' ? 'home' : 'settings');
   });
 }
 
@@ -401,7 +428,7 @@ function renderHome() {
         'Track habits you want to build and break, log your mood daily, and watch patterns emerge on a private heatmap. Everything stays on this device.'),
       h('button', {
         class: 'primary block',
-        onClick: () => go('manage'),
+        onClick: () => go('habits'),
       }, 'Add your first habit'),
     ));
     return view;
@@ -791,6 +818,29 @@ function deleteHabitConfirm(id) {
   editingHabitId = null;
   render();
   toast('Deleted');
+}
+
+// ---- Diary / Countdowns / Reports (stubs; filled in Blocks 8–11) ------------
+
+function renderDiary() {
+  return h('div', { class: 'view' },
+    h('h1', 'Diary'),
+    h('p', { class: 'muted' }, 'Your short daily entries will live here.'),
+  );
+}
+
+function renderCountdowns() {
+  return h('div', { class: 'view' },
+    h('h1', 'Coming up'),
+    h('p', { class: 'muted' }, 'Personal countdowns sorted by soonest first.'),
+  );
+}
+
+function renderReports() {
+  return h('div', { class: 'view' },
+    h('h1', 'Reports'),
+    h('p', { class: 'muted' }, 'Charts for mood, sleep, and habits over time.'),
+  );
 }
 
 // ---- Settings ---------------------------------------------------------------
@@ -1245,6 +1295,7 @@ function showUpdateToast(reg) {
 
 function init() {
   wireTabbar();
+  wireGear();
   render();
   registerSW();
   maybeOpenCheckIn();
