@@ -189,11 +189,11 @@ state.countdowns = [
 - [ ] 22c. E2E on phone (subscribe → time → push → tap); remove vapid-gen workflow
 
 ## Block 23 — Polish
-- [ ] 23a. Dedup via `lastSentDay`
-- [ ] 23b. 410/404 cleanup
-- [ ] 23c. Rate-limit `/api/subscribe`
-- [ ] 23d. Settings copy: platform caveats
-- [ ] 23e. Server-side logging in `/api/tick`
+- [x] 23a. Dedup via `lastSentDay` (landed with Block 18)
+- [x] 23b. 410/404 cleanup (landed with Block 18)
+- [x] 23c. Rate-limit `/api/subscribe`
+- [x] 23d. Settings copy: platform caveats
+- [x] 23e. Server-side logging in `/api/tick` (landed with Block 18)
 
 ---
 

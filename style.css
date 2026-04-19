@@ -296,6 +296,32 @@ label { display: block; font-size: 0.85rem; color: var(--muted); margin: 12px 0 
   color: #1a0a1a;
 }
 
+/* Collapsible info sections (e.g. "Platform notes" in Settings) */
+.reminder-details {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.reminder-details summary {
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: var(--muted);
+  list-style: none;
+  user-select: none;
+}
+.reminder-details summary::-webkit-details-marker { display: none; }
+.reminder-details summary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 6px;
+  transition: transform 0.15s ease;
+}
+.reminder-details[open] summary::before {
+  transform: rotate(90deg);
+}
+
 /* In-app reminder nudge banner */
 .reminder-banner {
   display: flex;

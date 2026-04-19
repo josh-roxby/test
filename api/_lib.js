@@ -55,6 +55,32 @@ export function endpointHash(endpoint) {
   return createHash('sha256').update(endpoint).digest('hex').slice(0, 32);
 }
 
+// Client IP from whatever proxy header is available. Best-effort only —
+// Vercel / CDNs may multi-hop, so we take the first entry in x-forwarded-for.
+export function clientIp(req) {
+  const fwd = req.headers?.['x-forwarded-for'];
+  if (typeof fwd === 'string' && fwd.length) return fwd.split(',')[0].trim();
+  const real = req.headers?.['x-real-ip'];
+  if (typeof real === 'string' && real.length) return real;
+  return 'unknown';
+}
+
+// Simple per-key token bucket stored in Redis. Returns `{ ok, count, limit }`.
+// `limit` is the max number of requests allowed per `windowSec` window.
+export async function rateLimit(bucketKey, { limit = 10, windowSec = 600 } = {}) {
+  try {
+    const count = await kv.incr(bucketKey);
+    if (count === 1) {
+      await kv.expire(bucketKey, windowSec);
+    }
+    return { ok: count <= limit, count, limit };
+  } catch (err) {
+    // If KV is temporarily unreachable, fail-open so real users aren't blocked.
+    console.warn('rateLimit failed, allowing:', err?.message || err);
+    return { ok: true, count: 0, limit };
+  }
+}
+
 export function readBody(req) {
   // Vercel Node runtime parses JSON bodies automatically when Content-Type is
   // application/json. Fall back to manual parse just in case.
