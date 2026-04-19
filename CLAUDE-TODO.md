@@ -122,11 +122,11 @@ state.countdowns = [
 - [x] 9c. Time-remaining formatter (`7d 3h`, `today`, `🎉 happened`, `archived`)
 
 ## Block 10 — Countdowns tab
-- [ ] 10a. Countdowns list view: upcoming sorted soonest-first, archived collapsed below
-- [ ] 10b. Themed tile component (background from theme preset, title, remaining time)
-- [ ] 10c. Edit form: title, description, date/time OR "days from now", theme picker, annual toggle
-- [ ] 10d. Save / archive / delete + annual auto-bump on render if past
-- [ ] 10e. Today-view peek: top upcoming countdown strip above habits
+- [x] 10a. Countdowns list view: upcoming sorted soonest-first, archived collapsed below
+- [x] 10b. Themed tile component (background from theme preset, title, remaining time)
+- [x] 10c. Edit form: title, description, date/time OR "days from now", theme picker, annual toggle
+- [x] 10d. Save / archive / delete + annual auto-bump on render if past
+- [x] 10e. Today-view peek: top upcoming countdown strip above habits
 
 ## Block 11 — Reports tab
 - [ ] 11a. `renderReports` + sub-tab nav (Overview / Mood / Sleep / Habits)

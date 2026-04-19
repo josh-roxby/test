@@ -567,6 +567,15 @@ function renderHome() {
     ));
   }
 
+  // Next upcoming countdown (peek strip)
+  const nextCountdown = sortedUpcomingCountdowns()[0];
+  if (nextCountdown) {
+    view.appendChild(renderCountdownTile(nextCountdown, {
+      style: { marginBottom: '16px', minHeight: '90px' },
+      onClick: () => go('countdowns'),
+    }));
+  }
+
   const active = state.habits.filter((x) => !x.archivedAt);
 
   if (active.length === 0) {
@@ -1069,14 +1078,292 @@ function renderDiaryCard(dayKey) {
   return card;
 }
 
-// ---- Diary / Countdowns / Reports (stubs; filled in Blocks 8–11) ------------
+// ---- Countdowns tab ---------------------------------------------------------
+
+// null = list view; 'new' = create form; '<id>' = edit form.
+let editingCountdownId = null;
+
+function startNewCountdown() { editingCountdownId = 'new'; render(); }
+function startEditCountdown(id) { editingCountdownId = id; render(); }
+function cancelCountdownEdit() { editingCountdownId = null; render(); }
+
+function isoToDatetimeLocal(iso) {
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  } catch { return ''; }
+}
+
+function datetimeLocalToIso(local) {
+  if (!local) return null;
+  const d = new Date(local);
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
 
 function renderCountdowns() {
-  return h('div', { class: 'view' },
+  reconcileCountdowns();
+  if (editingCountdownId !== null) return renderCountdownEdit();
+
+  const view = h('div', { class: 'view' });
+  view.appendChild(h('div', {
+    class: 'row between', style: { marginBottom: '8px' },
+  },
     h('h1', 'Coming up'),
-    h('p', { class: 'muted' }, 'Personal countdowns sorted by soonest first.'),
+    h('button', { class: 'primary', onClick: startNewCountdown }, '+ New'),
+  ));
+
+  const upcoming = sortedUpcomingCountdowns();
+  const archived = sortedArchivedCountdowns();
+
+  if (upcoming.length === 0 && archived.length === 0) {
+    view.appendChild(h('div', { class: 'summary', style: { marginTop: '8px' } },
+      h('h2', { style: { color: 'var(--text)', fontSize: '1.15rem', margin: '0 0 6px' } },
+        'No countdowns yet'),
+      h('p', { style: { margin: '0 0 14px' } },
+        'Track birthdays, holidays, milestones, deadlines — whatever you\'re counting toward. Each gets its own vibe.'),
+      h('button', { class: 'primary block', onClick: startNewCountdown },
+        'Add your first countdown'),
+    ));
+    return view;
+  }
+
+  if (upcoming.length > 0) {
+    view.appendChild(h('div', { class: 'section-head', style: { margin: '12px 0 8px' } },
+      'Upcoming'));
+    const grid = h('div', { class: 'stack' });
+    upcoming.forEach((c) => grid.appendChild(renderCountdownTile(c)));
+    view.appendChild(grid);
+  }
+
+  if (archived.length > 0) {
+    view.appendChild(h('div', { class: 'section-head', style: { margin: '20px 0 8px' } },
+      'Archived'));
+    const grid = h('div', { class: 'stack' });
+    archived.forEach((c) => grid.appendChild(renderCountdownTile(c)));
+    view.appendChild(grid);
+  }
+
+  return view;
+}
+
+function renderCountdownTile(c, opts = {}) {
+  const themeClass = `theme-${c.theme || 'mono'}`;
+  const kicker =
+    c.recurring === 'annual' ? 'Annual' :
+    c.archivedAt ? 'Archived' :
+    (c.description || '');
+
+  return h('div', {
+      class: `countdown-tile ${themeClass}`,
+      style: opts.style,
+      onClick: opts.onClick || (() => startEditCountdown(c.id)),
+      role: 'button',
+      tabindex: '0',
+      'aria-label': `${c.title}: ${formatCountdownRemaining(c)}`,
+    },
+    h('div', null,
+      kicker ? h('div', { class: 'c-sub' }, kicker) : null,
+      h('div', { class: 'c-title' }, c.title),
+    ),
+    h('div', null,
+      h('div', { class: 'c-remaining' }, formatCountdownRemaining(c)),
+      h('div', { class: 'c-target' }, formatCountdownTargetLabel(c)),
+    ),
   );
 }
+
+function renderCountdownEdit() {
+  const isNew = editingCountdownId === 'new';
+  const existing = isNew ? null : state.countdowns.find((c) => c.id === editingCountdownId);
+  if (!isNew && !existing) {
+    editingCountdownId = null;
+    return renderCountdowns();
+  }
+
+  const defaultTarget = new Date();
+  defaultTarget.setDate(defaultTarget.getDate() + 7);
+  defaultTarget.setHours(12, 0, 0, 0);
+
+  const draft = isNew ? {
+    id: countdownUid(),
+    title: '',
+    description: '',
+    target: defaultTarget.toISOString(),
+    theme: COUNTDOWN_THEMES[0].id,
+    recurring: null,
+    archivedAt: null,
+    createdAt: new Date().toISOString(),
+  } : { ...existing };
+
+  const view = h('div', { class: 'view' });
+
+  view.appendChild(h('div', { class: 'row between', style: { marginBottom: '8px' } },
+    h('button', { class: 'ghost', onClick: cancelCountdownEdit }, '← Back'),
+    h('h1', { style: { fontSize: '1.15rem' } }, isNew ? 'New countdown' : 'Edit countdown'),
+    h('span', { style: { width: '64px' } }),
+  ));
+
+  // Title
+  view.appendChild(h('label', 'Title'));
+  const titleIn = h('input', {
+    type: 'text', maxlength: 60, placeholder: "Dad's birthday",
+  });
+  titleIn.value = draft.title;
+  titleIn.addEventListener('input', () => { draft.title = titleIn.value; });
+  view.appendChild(titleIn);
+
+  // Description
+  view.appendChild(h('label', 'Description (optional)'));
+  const descIn = h('input', {
+    type: 'text', maxlength: 200, placeholder: 'Dinner at the Italian place',
+  });
+  descIn.value = draft.description || '';
+  descIn.addEventListener('input', () => { draft.description = descIn.value; });
+  view.appendChild(descIn);
+
+  // Target datetime
+  view.appendChild(h('label', 'Date & time'));
+  const dtIn = h('input', { type: 'datetime-local' });
+  dtIn.value = isoToDatetimeLocal(draft.target);
+  dtIn.addEventListener('input', () => {
+    const iso = datetimeLocalToIso(dtIn.value);
+    if (iso) draft.target = iso;
+  });
+  view.appendChild(dtIn);
+
+  // Days-from-now shortcut
+  view.appendChild(h('label', 'Or days from now'));
+  const daysIn = h('input', {
+    type: 'number', min: 0, max: 3650, step: 1, inputmode: 'numeric',
+    placeholder: '42',
+  });
+  daysIn.addEventListener('input', () => {
+    const n = Number(daysIn.value);
+    if (!Number.isFinite(n) || n < 0) return;
+    const d = new Date();
+    d.setDate(d.getDate() + n);
+    d.setHours(12, 0, 0, 0);
+    draft.target = d.toISOString();
+    dtIn.value = isoToDatetimeLocal(draft.target);
+  });
+  view.appendChild(daysIn);
+
+  // Recurring
+  view.appendChild(h('label', 'Recurring'));
+  view.appendChild(renderSegmented(
+    [
+      { id: 'one',    label: 'One-off'        },
+      { id: 'annual', label: 'Annual (birthday)' },
+    ],
+    draft.recurring === 'annual' ? 'annual' : 'one',
+    (v) => { draft.recurring = v === 'annual' ? 'annual' : null; },
+  ));
+
+  // Theme picker
+  view.appendChild(h('label', 'Theme'));
+  const grid = h('div', {
+    class: 'palette',
+    style: { gridTemplateColumns: 'repeat(4, 1fr)' },
+  });
+  function paintThemes() {
+    grid.replaceChildren();
+    COUNTDOWN_THEMES.forEach((t) => {
+      grid.appendChild(h('div', {
+        class: `theme-swatch theme-${t.id}` + (draft.theme === t.id ? ' selected' : ''),
+        role: 'button',
+        'aria-label': `Theme ${t.label}`,
+        tabindex: '0',
+        title: t.label,
+        onClick: () => { draft.theme = t.id; paintThemes(); },
+      }));
+    });
+  }
+  paintThemes();
+  view.appendChild(grid);
+
+  // Actions
+  const actions = h('div', { class: 'stack', style: { marginTop: '24px' } });
+  actions.appendChild(h('button', {
+    class: 'primary block',
+    onClick: () => saveCountdownDraft(draft, isNew),
+  }, 'Save'));
+
+  if (!isNew) {
+    if (existing.archivedAt) {
+      actions.appendChild(h('button', {
+        class: 'block ghost',
+        onClick: () => unarchiveCountdown(existing.id),
+      }, 'Unarchive'));
+    } else {
+      actions.appendChild(h('button', {
+        class: 'block ghost',
+        onClick: () => archiveCountdown(existing.id),
+      }, 'Archive'));
+    }
+    actions.appendChild(h('button', {
+      class: 'block danger',
+      onClick: () => deleteCountdownConfirm(existing.id),
+    }, 'Delete permanently'));
+  }
+  view.appendChild(actions);
+
+  return view;
+}
+
+function saveCountdownDraft(draft, isNew) {
+  const title = (draft.title || '').trim();
+  if (!title) { toast('Please enter a title'); return; }
+  draft.title = title;
+  draft.description = (draft.description || '').trim();
+  const target = new Date(draft.target);
+  if (isNaN(target.getTime())) { toast('Please pick a valid date'); return; }
+
+  if (isNew) {
+    state.countdowns.push(draft);
+  } else {
+    const i = state.countdowns.findIndex((c) => c.id === draft.id);
+    if (i >= 0) state.countdowns[i] = draft;
+  }
+  save();
+  editingCountdownId = null;
+  render();
+  toast(isNew ? 'Countdown added' : 'Saved');
+}
+
+function archiveCountdown(id) {
+  const c = state.countdowns.find((x) => x.id === id);
+  if (!c) return;
+  c.archivedAt = new Date().toISOString();
+  save();
+  editingCountdownId = null;
+  render();
+  toast('Archived');
+}
+
+function unarchiveCountdown(id) {
+  const c = state.countdowns.find((x) => x.id === id);
+  if (!c) return;
+  c.archivedAt = null;
+  save();
+  editingCountdownId = null;
+  render();
+  toast('Unarchived');
+}
+
+function deleteCountdownConfirm(id) {
+  const c = state.countdowns.find((x) => x.id === id);
+  if (!c) return;
+  if (!confirm(`Delete "${c.title}"?`)) return;
+  state.countdowns = state.countdowns.filter((x) => x.id !== id);
+  save();
+  editingCountdownId = null;
+  render();
+  toast('Deleted');
+}
+
+// ---- Reports (stub; filled in Block 11) -------------------------------------
 
 function renderReports() {
   return h('div', { class: 'view' },
@@ -1674,6 +1961,7 @@ function showUpdateToast(reg) {
 function init() {
   wireTabbar();
   wireGear();
+  reconcileCountdowns();
   render();
   registerSW();
   maybeOpenCheckIn();
