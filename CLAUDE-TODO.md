@@ -54,8 +54,8 @@ Working task list for the Tempo habit + mood PWA, broken into small chunks so ea
 - [x] 5a. Settings view: rollover hour slider
 - [x] 5b. Export JSON (download)
 - [x] 5c. Import JSON (file picker + validation)
-- [ ] 5d. Empty-state copy + onboarding nudge
-- [ ] 5e. Final polish: toasts, focus styles, SW update check
+- [x] 5d. Empty-state copy + onboarding nudge
+- [x] 5e. Final polish: toasts, focus styles, SW update check
 
 ---
 

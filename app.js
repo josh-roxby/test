@@ -394,9 +394,15 @@ function renderHome() {
   const active = state.habits.filter((x) => !x.archivedAt);
 
   if (active.length === 0) {
-    view.appendChild(h('div', { class: 'stack', style: { marginTop: '24px' } },
-      h('p', 'No habits yet.'),
-      h('button', { class: 'primary', onClick: () => go('manage') }, 'Add your first habit'),
+    view.appendChild(h('div', { class: 'summary', style: { marginTop: '8px' } },
+      h('h2', { style: { color: 'var(--text)', fontSize: '1.15rem', margin: '0 0 6px' } },
+        'Welcome to Tempo'),
+      h('p', { style: { margin: '0 0 14px' } },
+        'Track habits you want to build and break, log your mood daily, and watch patterns emerge on a private heatmap. Everything stays on this device.'),
+      h('button', {
+        class: 'primary block',
+        onClick: () => go('manage'),
+      }, 'Add your first habit'),
     ));
     return view;
   }
@@ -519,6 +525,8 @@ function renderManage() {
       h('p', 'No habits yet. Tap "+ New" to add one.'),
       h('p', { class: 'small muted' },
         'Good habits you want to build (like "Morning walk") and bad habits you want to break (like "Doomscrolling") both live here.'),
+      h('p', { class: 'small muted' },
+        'Tracking types — Tick (did or didn\'t), Count (e.g. 4 walks), Percent (e.g. 90% urges logged).'),
     ));
     return view;
   }
@@ -945,6 +953,9 @@ function closeCheckIn(dismiss = true) {
 
 function maybeOpenCheckIn() {
   if (checkInOpen || checkInDismissed) return;
+  // Skip auto-open for brand-new users so they see the welcome screen first.
+  const hasAnyData = state.habits.length > 0 || Object.keys(state.logs).length > 0;
+  if (!hasAnyData) return;
   if (nextIncompleteStep() !== null) openCheckIn();
 }
 
@@ -1191,10 +1202,43 @@ function registerSW() {
   if (!('serviceWorker' in navigator)) return;
   if (location.protocol === 'file:') return;
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./service-worker.js').catch((err) => {
-      console.warn('Service worker registration failed:', err);
-    });
+    navigator.serviceWorker.register('./service-worker.js')
+      .then((reg) => {
+        reg.addEventListener('updatefound', () => {
+          const installing = reg.installing;
+          if (!installing) return;
+          installing.addEventListener('statechange', () => {
+            if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+              showUpdateToast(reg);
+            }
+          });
+        });
+      })
+      .catch((err) => console.warn('Service worker registration failed:', err));
   });
+}
+
+let reloadingFromSW = false;
+function showUpdateToast(reg) {
+  let el = qs('#toast');
+  if (!el) {
+    el = h('div', { id: 'toast', role: 'status', 'aria-live': 'polite' });
+    document.body.appendChild(el);
+  }
+  el.textContent = '';
+  el.append(
+    'Tempo just updated',
+    h('button', {
+      onClick: () => {
+        if (reloadingFromSW) return;
+        reloadingFromSW = true;
+        try { reg.waiting?.postMessage({ type: 'SKIP_WAITING' }); } catch {}
+        location.reload();
+      },
+    }, 'Reload'),
+  );
+  el.classList.add('show');
+  clearTimeout(toastTimer); // persistent — user action required
 }
 
 // ---- Init -------------------------------------------------------------------
