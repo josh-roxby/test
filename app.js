@@ -17,6 +17,7 @@ const DEFAULT_STATE = {
       time: '09:00',
       timezone: null,   // filled in when the user subscribes
       endpoint: null,   // last successful push subscription endpoint
+      dismissedDate: null, // YYYY-MM-DD — day the user dismissed the in-app nudge
     },
   },
 };
@@ -542,6 +543,7 @@ function render() {
   else app.appendChild(renderHome());
   updateTabbar();
   updateGear();
+  updateAppBadge();
 }
 
 function updateTabbar() {
@@ -573,6 +575,74 @@ function wireGear() {
   gear.addEventListener('click', () => {
     go(route === 'settings' ? 'home' : 'settings');
   });
+}
+
+// ---- Reminder nudge (in-app fallback when push isn't active) ----------------
+
+function reminderTimePassed() {
+  const t = state.settings.reminder?.time || '18:00';
+  const [th, tm] = t.split(':').map(Number);
+  const now = new Date();
+  return now.getHours() * 60 + now.getMinutes() >= th * 60 + tm;
+}
+
+function pushReminderActive() {
+  const r = state.settings.reminder;
+  return !!(r?.enabled && r?.endpoint);
+}
+
+function shouldShowReminderNudge() {
+  if (pushReminderActive()) return false;         // real push is doing the job
+  if (nextIncompleteStep() === null) return false; // already checked in
+  if (state.settings.reminder?.dismissedDate === currentDayKey()) return false;
+  return reminderTimePassed();
+}
+
+function dismissReminderToday() {
+  state.settings.reminder = state.settings.reminder || {};
+  state.settings.reminder.dismissedDate = currentDayKey();
+  save();
+  render();
+}
+
+function renderReminderBanner() {
+  const time = state.settings.reminder?.time || '18:00';
+  return h('div', {
+    class: 'reminder-banner',
+    role: 'button',
+    tabindex: '0',
+    onClick: () => openCheckIn(),
+  },
+    h('div', null,
+      h('div', { style: { fontWeight: 600 } },
+        "Haven't checked in yet today"),
+      h('div', { class: 'small muted' },
+        `You usually check in by ${time}. Tap to start.`),
+    ),
+    h('button', {
+      class: 'ghost',
+      style: { padding: '6px 10px', minHeight: '32px' },
+      onClick: (e) => {
+        e.stopPropagation();
+        dismissReminderToday();
+      },
+      'aria-label': 'Dismiss for today',
+    }, '✕'),
+  );
+}
+
+function updateAppBadge() {
+  try {
+    if ('setAppBadge' in navigator) {
+      if (nextIncompleteStep() !== null && reminderTimePassed()) {
+        navigator.setAppBadge(1);
+      } else {
+        navigator.clearAppBadge?.();
+      }
+    }
+  } catch {
+    // Badging API can throw on some permission states; swallow quietly.
+  }
 }
 
 // ---- View stubs -------------------------------------------------------------
@@ -629,6 +699,12 @@ function renderHome() {
       onClick: () => openCheckIn(0),
     }, 'Edit'));
     view.appendChild(summary);
+  }
+
+  // In-app reminder nudge (shown only when push isn't active and user is past
+  // their reminder time with an incomplete check-in).
+  if (shouldShowReminderNudge()) {
+    view.appendChild(renderReminderBanner());
   }
 
   // 2×2 glanceable tile grid (Diary · Habits · Countdowns · Reports)
@@ -2355,7 +2431,8 @@ function renderRemindersSection() {
   }
 
   wrap.appendChild(h('p', { class: 'small muted' },
-    'Get a push reminder at your chosen time each day. Requires this PWA to be installed on your device (Android: "Add to Home screen").'));
+    'Get a push reminder at your chosen time each day. Requires this PWA to be installed on your device (Android: "Add to Home screen"). ' +
+    'If push isn\'t granted or the browser doesn\'t support it, Tempo falls back to an in-app banner when you open the app past your reminder time.'));
 
   // Toggle row
   const toggleRow = h('div', {

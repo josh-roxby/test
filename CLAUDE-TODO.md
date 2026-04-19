@@ -235,10 +235,10 @@ state.countdowns = [
 - [x] 15f. Animation polish
 
 ## Block 16 — In-app reminder nudge (fallback for no-push users)
-- [ ] 16a. Sticky banner on Today past `settings.reminder.time` when check-in incomplete (only if push is NOT active)
-- [ ] 16b. Dismiss-for-today button on the banner
-- [ ] 16c. Badging API (`navigator.setAppBadge(1)`) when check-in incomplete past reminder
-- [ ] 16d. Settings copy explaining push vs in-app fallback
+- [x] 16a. Sticky banner on Today past `settings.reminder.time` when check-in incomplete (only if push is NOT active)
+- [x] 16b. Dismiss-for-today button on the banner
+- [x] 16c. Badging API (`navigator.setAppBadge(1)`) when check-in incomplete past reminder
+- [x] 16d. Settings copy explaining push vs in-app fallback
 
 ## Block 17 — Fast wins: undo + backup nudge
 - [ ] 17a. Extend `toast(message, { action, onAction, duration })` with inline action button
