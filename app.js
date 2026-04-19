@@ -220,6 +220,26 @@ function currentStreak(habit) {
   return streak;
 }
 
+function longestStreak(habit) {
+  const creationDay = habit.createdAt
+    ? dayKeyFromDate(new Date(habit.createdAt))
+    : null;
+  let day = currentDayKey();
+  let longest = 0;
+  let run = 0;
+  for (let i = 0; i < 400; i++) {
+    if (creationDay && day < creationDay) break;
+    if (isHabitDoneForDay(habit, day)) {
+      run++;
+      if (run > longest) longest = run;
+    } else {
+      run = 0;
+    }
+    day = daysAgo(day, 1);
+  }
+  return longest;
+}
+
 function ensureTodayLog() {
   const key = currentDayKey();
   if (!state.logs[key]) {
@@ -493,13 +513,20 @@ function toast(message, ms = 2000) {
 // ---- Router -----------------------------------------------------------------
 
 const ROUTES = new Set([
-  'home', 'habits', 'diary', 'countdowns', 'reports', 'settings',
+  'home', 'habits', 'diary', 'countdowns', 'reports', 'settings', 'habit-detail',
 ]);
 let route = 'home';
+let viewingHabitId = null;
 
 function go(next) {
   if (!ROUTES.has(next)) next = 'home';
   route = next;
+  render();
+}
+
+function viewHabit(id) {
+  viewingHabitId = id;
+  route = 'habit-detail';
   render();
 }
 
@@ -511,6 +538,7 @@ function render() {
   else if (route === 'countdowns') app.appendChild(renderCountdowns());
   else if (route === 'reports') app.appendChild(renderReports());
   else if (route === 'settings') app.appendChild(renderSettings());
+  else if (route === 'habit-detail') app.appendChild(renderHabitDetail());
   else app.appendChild(renderHome());
   updateTabbar();
   updateGear();
@@ -652,28 +680,26 @@ function renderHomeHabitCard(habit) {
   const done = isHabitDoneForDay(habit, today);
   const streak = currentStreak(habit);
 
-  const card = h('div', {
+  return h('div', {
       class: `habit ${habit.kind}${done ? ' done' : ''}`,
       style: { '--habit-color': habit.color },
+      role: 'button',
+      tabindex: '0',
+      'aria-label': `${habit.title} — open details`,
+      onClick: () => viewHabit(habit.id),
     },
     h('div', { class: 'stripe' }),
     h('div', null,
       h('div', { class: 'title' }, habit.title),
-      h('div', { class: 'meta' }, habitMeta(habit)),
       streak > 0
-        ? h('div', { style: { marginTop: '4px' } },
+        ? h('div', { style: { marginTop: '2px' } },
             h('span', { class: 'streak' },
-              `🔥 ${streak}-day ${habit.kind === 'good' ? 'streak' : 'clean streak'}`),
+              `🔥 ${streak}${habit.kind === 'good' ? '' : ' clean'}`),
           )
         : null,
     ),
     h('div', { class: 'state' }, todayStateText(habit)),
   );
-
-  const wrapper = h('div');
-  wrapper.appendChild(card);
-  wrapper.appendChild(renderHeatmap(habit));
-  return wrapper;
 }
 
 function renderHeatmap(habit) {
@@ -715,6 +741,71 @@ function renderHeatmap(habit) {
     }
   }
   return grid;
+}
+
+// ---- Habit detail view ------------------------------------------------------
+
+function renderHabitDetail() {
+  const habit = state.habits.find((x) => x.id === viewingHabitId);
+  if (!habit) {
+    viewingHabitId = null;
+    route = 'home';
+    return renderHome();
+  }
+
+  const view = h('div', { class: 'view' });
+
+  view.appendChild(h('div', { class: 'row between', style: { marginBottom: '8px' } },
+    h('button', { class: 'ghost', onClick: () => go('home') }, '← Back'),
+    h('span', { class: 'pill' }, habit.kind === 'good' ? 'Build' : 'Break'),
+  ));
+
+  // Title + stripe
+  view.appendChild(h('div', {
+    class: 'habit',
+    style: { '--habit-color': habit.color, marginBottom: '12px' },
+  },
+    h('div', { class: 'stripe' }),
+    h('div', null,
+      h('div', { class: 'title', style: { fontSize: '1.15rem' } }, habit.title),
+      habit.description
+        ? h('div', { class: 'meta' }, habit.description)
+        : h('div', { class: 'meta muted' }, habitMeta(habit)),
+    ),
+    h('div', { class: 'state' }, todayStateText(habit)),
+  ));
+
+  // Meta chips
+  const chips = h('div', { class: 'row', style: { gap: '6px', flexWrap: 'wrap', marginBottom: '12px' } });
+  chips.appendChild(h('span', { class: 'pill' },
+    habit.type === 'tick' ? 'Tick' :
+    habit.type === 'count' ? `Count · target ${habit.target}${habit.unit ? ' ' + habit.unit : ''}` :
+    `Percent · target ${habit.target}%`));
+  if (habit.archivedAt) chips.appendChild(h('span', { class: 'pill' }, 'Archived'));
+  view.appendChild(chips);
+
+  // Streak stats
+  const cur = currentStreak(habit);
+  const best = longestStreak(habit);
+  view.appendChild(h('div', { class: 'row', style: { gap: '8px', flexWrap: 'wrap', marginBottom: '12px' } },
+    h('span', { class: 'pill' }, `🔥 ${cur} day${cur === 1 ? '' : 's'} current`),
+    h('span', { class: 'pill' }, `🏆 ${best} day${best === 1 ? '' : 's'} best`),
+  ));
+
+  // Heatmap (big)
+  view.appendChild(h('div', { class: 'section-head', style: { margin: '4px 0 6px' } },
+    'Last 12 weeks'));
+  view.appendChild(renderHeatmap(habit));
+
+  // Edit action
+  view.appendChild(h('div', { class: 'stack', style: { marginTop: '20px' } },
+    h('button', {
+      class: 'block',
+      onClick: () => { startEditHabit(habit.id); go('habits'); },
+    }, 'Edit habit'),
+  ));
+
+  return view;
 }
 
 // ---- Manage: list + edit ----------------------------------------------------
