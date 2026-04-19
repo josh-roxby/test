@@ -136,10 +136,77 @@ function toast(message, ms = 2000) {
   toastTimer = setTimeout(() => el.classList.remove('show'), ms);
 }
 
+// ---- Router -----------------------------------------------------------------
+
+const ROUTES = new Set(['home', 'manage', 'settings']);
+let route = 'home';
+
+function go(next) {
+  if (!ROUTES.has(next)) next = 'home';
+  route = next;
+  render();
+}
+
+function render() {
+  const app = qs('#app');
+  app.replaceChildren();
+  if (route === 'manage') app.appendChild(renderManage());
+  else if (route === 'settings') app.appendChild(renderSettings());
+  else app.appendChild(renderHome());
+  updateTabbar();
+}
+
+function updateTabbar() {
+  const tabbar = qs('#tabbar');
+  tabbar.hidden = false;
+  qsa('.tab', tabbar).forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.route === route);
+  });
+}
+
+function wireTabbar() {
+  qsa('#tabbar .tab').forEach((btn) => {
+    btn.addEventListener('click', () => go(btn.dataset.route));
+  });
+}
+
+// ---- View stubs -------------------------------------------------------------
+
+function renderHome() {
+  return h('div', { class: 'view' },
+    h('h1', 'Today'),
+    h('p', 'Home view — coming soon. You\'ll see your habits and mood here.'),
+  );
+}
+
+function renderManage() {
+  return h('div', { class: 'view' },
+    h('h1', 'Habits'),
+    h('p', 'Manage view — coming soon. You\'ll add, edit, and archive habits here.'),
+  );
+}
+
+function renderSettings() {
+  return h('div', { class: 'view' },
+    h('h1', 'Settings'),
+    h('p', 'Settings view — coming soon. Rollover hour, export/import, about.'),
+  );
+}
+
+// ---- Init -------------------------------------------------------------------
+
+function init() {
+  wireTabbar();
+  render();
+}
+
+init();
+
 // Expose for console debugging during development.
 globalThis.__tempo = {
   get state() { return state; },
   save, load, STORAGE_KEY,
   currentDayKey, daysAgo, strHash,
   h, qs, qsa, toast,
+  go, render,
 };

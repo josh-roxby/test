@@ -25,7 +25,7 @@ Working task list for the Tempo habit + mood PWA, broken into small chunks so ea
 - [x] 1a. `app.js`: storage layer (`load` / `save`, default state, `STORAGE_KEY`)
 - [x] 1b. `app.js`: day helpers (`currentDayKey` with 3am rollover, `daysAgo`, `strHash`)
 - [x] 1c. `app.js`: DOM helper `h()` + `toast()` + `qs()`
-- [ ] 1d. `app.js`: router (`route` state, `go()`, `render()`, tabbar wiring, empty view stubs)
+- [x] 1d. `app.js`: router (`route` state, `go()`, `render()`, tabbar wiring, empty view stubs)
 - [ ] 1e. `manifest.json` + `icon.svg`
 - [ ] 1f. `service-worker.js` (cache-first shell) + registration in `app.js`
 
