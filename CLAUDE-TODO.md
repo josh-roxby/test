@@ -143,3 +143,54 @@ state.countdowns = [
 - [x] 12c. Diary char counters (e.g. `112/140`, red at >= 140)
 - [x] 12d. Mobile: 5-tab spacing audit, label sizing
 - [x] 12e. End-to-end smoke test + commit + deploy notes
+
+---
+
+# Phase 4 — Real push notifications (Vercel serverless + GitHub Actions cron)
+
+**Branch:** `feat/phase-4`
+
+**External setup (done):** Upstash Redis via Vercel · `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` / `TICK_SECRET` in Vercel env · `TICK_SECRET` in GitHub repo secrets.
+
+**Architecture:** `@vercel/kv` stores one record per device endpoint, signed with VAPID via `web-push`, triggered every 15 min by GitHub Actions cron hitting `/api/tick?secret=…`. Timezone-aware, ±7-min window, dedup via `lastSentDay`.
+
+## Block 18 — Backend
+- [x] 18a. `package.json` + deps: `web-push`, `@vercel/kv`
+- [x] 18b. `/api/subscribe.js` — POST, upsert sub in KV
+- [x] 18c. `/api/unsubscribe.js` — POST, remove sub
+- [x] 18d. `/api/tick.js` — GET (secret-gated), scan, filter due, send, cleanup
+- [x] 18e. `/api/vapid-public.js` — GET public key for client
+- [x] 18f. `/api/test-send.js` — POST, fires an immediate test push to the caller's endpoint
+
+## Block 19 — Service worker handlers
+- [ ] 19a. `push` event → `registration.showNotification`
+- [ ] 19b. `notificationclick` → focus app, open check-in
+- [ ] 19c. `pushsubscriptionchange` → re-subscribe on backend
+- [ ] 19d. Bump SW `VERSION`
+
+## Block 20 — Client subscribe helpers
+- [ ] 20a. Fetch `VAPID_PUBLIC_KEY` from `/api/vapid-public`
+- [ ] 20b. `requestNotificationPermission()`
+- [ ] 20c. `subscribeToPush()`
+- [ ] 20d. `unsubscribeFromPush()`
+- [ ] 20e. `urlBase64ToUint8Array()` util
+
+## Block 21 — Settings UI: Daily reminders
+- [ ] 21a. Extend settings schema + back-compat
+- [ ] 21b. Settings section: toggle, time picker, timezone, device status
+- [ ] 21c. Enable flow (permission → subscribe → POST)
+- [ ] 21d. Disable flow (unsubscribe → POST)
+- [ ] 21e. States: denied / unsupported / pending / connected
+- [ ] 21f. Test notification panel: "Send now" + delay picker (5s / 30s / 1m / 5m / 15m)
+
+## Block 22 — Cron + E2E
+- [ ] 22a. `.github/workflows/reminder-tick.yml` — `*/15 * * * *`
+- [ ] 22b. Trigger cron manually once to verify
+- [ ] 22c. E2E on phone (subscribe → time → push → tap); remove vapid-gen workflow
+
+## Block 23 — Polish
+- [ ] 23a. Dedup via `lastSentDay`
+- [ ] 23b. 410/404 cleanup
+- [ ] 23c. Rate-limit `/api/subscribe`
+- [ ] 23d. Settings copy: platform caveats
+- [ ] 23e. Server-side logging in `/api/tick`
