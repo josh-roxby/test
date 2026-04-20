@@ -293,3 +293,135 @@ state.countdowns = [
 - [x] 17c. Undo for countdown archive / delete
 - [x] 17d. `settings.lastExportAt` timestamp on export
 - [x] 17e. Monthly backup nudge banner on Settings
+
+---
+
+# Phase 5 — Remaining feature plan (trimmed)
+
+Only the sub-features we're actually pursuing. Dropped from plan (archived): C (QR transfer), G (Year heatmap), I (Gratitude rotating), K (Mood tags), R (Onboarding tour — done via Phase 5 onboarding), S (Calendar view), T (Typography). Entry-flow block (M–Q) built; Q (photo) will be removed in Phase 6.
+
+## Shareability
+
+**A. Share-a-report URL**
+- [ ] A-1. Base64-URL encoder/decoder helpers (`encodeShareState`, `decodeShareState`)
+- [ ] A-2. Compact wrapped payload: `{range, stats subset, version}` — only fields the read-only view needs
+- [ ] A-3. Boot-time `?share=…` detector: if present, open read-only Wrapped and skip normal render
+- [ ] A-4. Read-only Wrapped modal variant (no local state writes; "Open Tempo" CTA instead of Done)
+- [ ] A-5. "Share" button on the Outro stage of the normal Wrapped modal
+- [ ] A-6. `navigator.share({ url, title })` with clipboard fallback
+- [ ] A-7. URL length budget check; friendly "shared snapshot is ~Xkb" note
+
+**B. Shareable wrapped card (image)**
+- [ ] B-1. `<canvas>` composer: title, big stat, emoji, Tempo watermark
+- [ ] B-2. Resolve fonts + colors from CSS vars so card matches current theme
+- [ ] B-3. "Save image" button on Outro stage; triggers PNG download
+- [ ] B-4. `navigator.share({ files })` when supported on Android
+
+## Insights
+
+**D. Correlations panel**
+- [ ] D-1. Pearson correlation helper + `correlateSeries(a, b)` utility
+- [ ] D-2. Pair detector: mood↔sleepQuality, mood↔sleepHours, mood↔each habit, sleepQuality↔each habit
+- [ ] D-3. Threshold: only surface pairs with `|r| >= 0.35` AND `>= 30` overlapping days
+- [ ] D-4. Human phrasing generator ("You sleep ~0.6 points better on walk days")
+- [ ] D-5. New sub-tab or panel on Reports ("Insights")
+- [ ] D-6. Empty-state copy when not enough data
+
+**E. Pattern nudges**
+- [ ] E-1. Rolling-average detector ("mood 7-day avg up vs previous 7 days by X")
+- [ ] E-2. Day-of-week distribution detector ("Mondays are your hardest day")
+- [ ] E-3. Streak-at-risk check ("2 days since meditation")
+- [ ] E-4. Nudge card on Today (below habit list, above stats)
+- [ ] E-5. Dismiss/hide individual nudge for N days
+
+**F. Streak milestones**
+- [ ] F-1. Detect 7 / 30 / 100 / 365 crossings on render per habit
+- [ ] F-2. Store `celebratedMilestones: { habitId: [7, 30, …] }` on habit record
+- [ ] F-3. Full-screen confetti moment (CSS keyframes + SVG particles)
+- [ ] F-4. Milestone card with habit title + message; "Keep going" to dismiss
+- [ ] F-5. One celebration per day max
+
+## Content & reflection
+
+**H. Weekly review**
+- [ ] H-1. Aggregator `weeklyReviewStats(weekStartKey)` (best day, hardest day, habit of the week, diary highlight)
+- [ ] H-2. Modal modeled on Wrapped; stages scoped to the week
+- [ ] H-3. Auto-offer once per week on Sunday evening (past reminder) — dismissible
+- [ ] H-4. Access button on Reports header alongside "At a glance"
+- [ ] H-5. Optional "save as diary entry" action
+
+**J. Diary search**
+- [ ] J-1. Search input at top of Diary tab (debounced 200ms)
+- [ ] J-2. Case-insensitive filter over `good + challenge` text
+- [ ] J-3. Highlight matches in snippets
+- [ ] J-4. "X of Y entries" count
+
+**L. Custom reflection prompts**
+- [ ] L-1. Settings section "Your prompts" (add/edit/remove)
+- [ ] L-2. Persist in `state.customPrompts[]`
+- [ ] L-3. Merge with built-ins in daily rotation
+- [ ] L-4. Export/import includes custom prompts
+
+> Note: L's merge-with-daily-rotation interacts with Phase 6 (which turns the prompt step into a pure fun-fact display). If Phase 6 ships first, L becomes "edit the fun-fact bank" or we revisit scope.
+
+---
+
+# Phase 6 — Simpler daily flow (breath / mood / fact / journal / breath)
+
+**Branch:** (TBD — `feat/phase-6-flow` when building)
+
+**Core decisions:**
+- **Remove photo / IndexedDB feature** entirely (rolls back Phase 5 Q). Less scope, less to maintain.
+- **Remove reflection prompts from the flow**. The prompt step becomes a **pure fun-fact display card** — no input, no "how does this make you feel?". It's a visual break between inputs.
+- **Sleep moves out of the check-in flow** — logged via a dedicated widget on Today (quick-access face picker + hours).
+- **Habits move out of the check-in flow** — already quick-loggable from Today (pill tap + swipe from Phase 5 E). No habits step in check-in.
+- **New daily check-in flow** (5 stages):
+  1. **Breath-in** — 5-second pleasant radial countdown timer; auto-advances.
+  2. **Mood** — 5-face picker (same as today).
+  3. **Fun fact** — display-only card that breaks the input flow gently.
+  4. **Journal** — one good thing + one challenge/learning (140-char cap each).
+  5. **Breath-out** — 5-second radial timer, same aesthetic as intro.
+- **Rationale**: the current flow is long (6 steps). Concentrating on breath + reflection makes the ritual feel more mindful. Habits and sleep live where you actually interact with them (Today), not inside a ceremony.
+
+## Block 24 — Remove photo + IndexedDB feature
+- [ ] 24-1. Remove photo input from diary step (`renderDiaryPhotoField`)
+- [ ] 24-2. Remove thumbnail rendering from diary timeline cards
+- [ ] 24-3. Remove `_photos` embedding in export; skip photo keys on import (graceful for old backups)
+- [ ] 24-4. Keep `clearAllPhotos()` reachable from `deleteAllData()` so legacy photos still clear
+- [ ] 24-5. Delete `diary-photo-preview` / `diary-photo-thumb` CSS
+- [ ] 24-6. Strip `diary.hasPhoto` field on save (or leave as a no-op field — decide)
+
+## Block 25 — Radial breath timer component
+- [ ] 25-1. `renderBreathTimer({ seconds, onDone, label })` helper → returns a centered SVG
+- [ ] 25-2. Radial fill animation via `stroke-dashoffset` on an `<circle>` over `seconds` duration
+- [ ] 25-3. Pulsing outer ring + subtle scale breathing animation
+- [ ] 25-4. Tap-to-skip support (optional — default on for accessibility)
+- [ ] 25-5. CSS keyframes + reduced-motion fallback
+
+## Block 26 — Rework check-in flow
+- [ ] 26-1. Redefine `CHECKIN_STEPS = ['breathIn', 'mood', 'fact', 'journal', 'breathOut']`
+- [ ] 26-2. Rename/refit `ensureTodayLog` steps shape; back-compat with old step names (treat as done/skip)
+- [ ] 26-3. New `renderBreathInStep` using the timer (auto-advance)
+- [ ] 26-4. Keep `renderMoodStep` (essentially unchanged)
+- [ ] 26-5. New `renderFactStep` — display-only fun fact card, Next button
+- [ ] 26-6. Keep `renderJournalStep` (rename from diary-step, same 140-char good + challenge)
+- [ ] 26-7. New `renderBreathOutStep` — timer + summary line ("see you tomorrow")
+- [ ] 26-8. Remove `renderSleepStep`, `renderHabitsStep`, `renderPromptStep` (retire from the flow)
+- [ ] 26-9. Update `renderSummaryStep` → fold into breathOut's closing or drop entirely
+- [ ] 26-10. Reduce prompts bank to fun facts only; drop reflection-prompt list
+
+## Block 27 — Sleep widget on Today
+- [ ] 27-1. Small sleep card on Today (above or near habits): shows last night's value or "Log sleep"
+- [ ] 27-2. Tap → inline bottom sheet with 5-face picker + optional hours input
+- [ ] 27-3. Persists to `state.logs[today].sleep`; fires toast with Undo
+- [ ] 27-4. Reports (Sleep sub-tab) continues to work against same data
+
+## Block 28 — Habits confirmed Today-only
+- [ ] 28-1. No habits step in the flow — verified
+- [ ] 28-2. Summary screen (if kept) shows habit progress from Today state
+- [ ] 28-3. Quick-log + swipe already cover interaction (Phase 5 E)
+
+## Block 29 — Wrapped / Reports consistency
+- [ ] 29-1. Wrapped still reads sleep + habits from their own sources (no change needed)
+- [ ] 29-2. Remove "reflection prompt" card style from wrapped stages if referenced
+- [ ] 29-3. Confirm completion tracking on Today still surfaces via `nextIncompleteStep`
