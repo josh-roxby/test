@@ -1079,10 +1079,48 @@ function renderHomeStatsCard() {
   );
 }
 
+function quickLogHabit(habit) {
+  const log = ensureTodayLog();
+  log.habits = log.habits || {};
+  const prev = log.habits[habit.id];
+  const revert = () => {
+    if (prev === undefined) delete log.habits[habit.id];
+    else log.habits[habit.id] = prev;
+    save();
+    render();
+  };
+
+  if (habit.type === 'tick') {
+    const next = !prev;
+    log.habits[habit.id] = next;
+    log.steps.habits = true;
+    save();
+    render();
+    toast(next ? 'Marked done' : 'Cleared', { action: 'Undo', onAction: revert });
+    return;
+  }
+
+  if (habit.type === 'count') {
+    const next = (Number(prev) || 0) + 1;
+    log.habits[habit.id] = next;
+    log.steps.habits = true;
+    save();
+    render();
+    const unit = habit.unit ? ` ${habit.unit}` : '';
+    toast(`+1 · ${next}/${habit.target}${unit}`, { action: 'Undo', onAction: revert });
+    return;
+  }
+
+  // Percent doesn't quick-log naturally — open the detail view so the user
+  // can enter a precise number.
+  viewHabit(habit.id);
+}
+
 function renderHomeHabitCard(habit) {
   const today = currentDayKey();
   const done = isHabitDoneForDay(habit, today);
   const streak = currentStreak(habit);
+  const logged = habitValueForDay(habit, today) !== undefined;
 
   return h('div', {
       class: `habit ${habit.kind}${done ? ' done' : ''}`,
@@ -1102,7 +1140,17 @@ function renderHomeHabitCard(habit) {
           )
         : null,
     ),
-    h('div', { class: 'state' }, todayStateText(habit)),
+    h('button', {
+      type: 'button',
+      class: 'habit-state-btn' + (logged ? ' logged' : '') + (done ? ' done' : ''),
+      'aria-label': habit.type === 'percent'
+        ? `${habit.title} — open to log percentage`
+        : `${habit.title} — tap to log`,
+      onClick: (e) => {
+        e.stopPropagation();
+        quickLogHabit(habit);
+      },
+    }, todayStateText(habit)),
   );
 }
 
