@@ -227,6 +227,23 @@ state.countdowns = [
 
 ---
 
+# Phase 5 — Onboarding + custom confirm drawer
+
+**Branch:** `feat/phase-5-onboarding`
+
+- [x] `settings.onboarded` state (`null` = first visit, `false` = mid-tutorial, `true` = done); back-compat grandfathers existing users to `true`
+- [x] Welcome screen for `onboarded === null`: "I'm new" vs "I have a backup"
+- [x] Import-from-welcome flow (pipe through `handleImport`)
+- [x] Onboarding tutorial sheet: intro → theme → reminders → install → backup → done
+- [x] PWA-only enforcement post-onboarding (renders install gate if not standalone)
+- [x] `beforeinstallprompt` capture + inline "Install now" button
+- [x] `deleteAllData` resets `onboarded` to `false` → re-runs tutorial
+- [x] "Show tutorial again" button in Settings
+- [x] `showConfirm({ title, body, primary, primaryDanger })` promise-based drawer
+- [x] All native `confirm()` calls replaced (habit delete, countdown delete, template install, import, delete-all)
+
+---
+
 # Phase 3 — Home refinement, At a glance, Fast wins
 
 **Branch:** `feat/phase-3-build`

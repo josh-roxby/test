@@ -13,6 +13,10 @@ const DEFAULT_STATE = {
   settings: {
     rolloverHour: 3,
     theme: 'system',         // 'system' | 'dark' | 'light'
+    // null = never visited (show welcome / import)
+    // false = visited but tutorial not done (run onboarding)
+    // true  = fully set up
+    onboarded: null,
     lastExportAt: null,      // ISO timestamp of most recent JSON export
     reminder: {
       enabled: false,
@@ -35,7 +39,7 @@ function load() {
     if (!raw) return defaultState();
     const parsed = JSON.parse(raw);
     const defaults = defaultState();
-    return {
+    const merged = {
       ...defaults,
       ...parsed,
       settings: {
@@ -47,6 +51,15 @@ function load() {
         },
       },
     };
+    // Grandfather pre-onboarding users: if they already have data, treat them
+    // as fully onboarded so they aren't thrown into the tutorial on upgrade.
+    if (!('onboarded' in (parsed.settings || {}))) {
+      const hasData = (merged.habits?.length || 0) > 0
+        || Object.keys(merged.logs || {}).length > 0
+        || (merged.countdowns?.length || 0) > 0;
+      merged.settings.onboarded = hasData ? true : null;
+    }
+    return merged;
   } catch {
     return defaultState();
   }
@@ -188,13 +201,15 @@ function installHabitTemplate(templateId) {
   toast(`${tpl.title} installed`);
 }
 
-function confirmInstallTemplate(templateId) {
+async function confirmInstallTemplate(templateId) {
   const tpl = HABIT_TEMPLATES.find((t) => t.id === templateId);
   if (!tpl) return;
-  const list = tpl.habits.map((h) => `• ${h.title}`).join('\n');
-  const ok = confirm(
-    `Install "${tpl.title}" starter pack?\n\n${list}\n\nYou can edit or delete any of these afterwards.`,
-  );
+  const list = tpl.habits.map((ht) => `• ${ht.title}`).join('\n');
+  const ok = await showConfirm({
+    title: `Install "${tpl.title}"?`,
+    body: `${list}\n\nYou can edit or delete any of these afterwards.`,
+    primary: 'Install',
+  });
   if (ok) installHabitTemplate(templateId);
 }
 
@@ -659,6 +674,63 @@ function toast(message, options = {}) {
   toastTimer = setTimeout(() => el.classList.remove('show'), ms);
 }
 
+// Promise-based confirm drawer. Replaces native `confirm()` — cleaner on
+// mobile, matches the app aesthetic, supports danger styling.
+//
+//   const ok = await showConfirm({
+//     title: 'Delete habit?',
+//     body:  'This removes it and all its history permanently.',
+//     primary: 'Delete',
+//     primaryDanger: true,
+//   });
+function showConfirm({ title, body, primary = 'Confirm', cancel = 'Cancel', primaryDanger = false } = {}) {
+  return new Promise((resolve) => {
+    // Dismiss any existing confirm so only one is on screen.
+    qsa('.confirm-scrim').forEach((el) => el.remove());
+
+    let done = false;
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      scrim.classList.remove('open');
+      setTimeout(() => scrim.remove(), 180);
+      resolve(value);
+    };
+
+    const scrim = h('div', {
+      class: 'scrim confirm-scrim',
+      onClick: (e) => { if (e.target === scrim) finish(false); },
+    });
+    const sheet = h('div', { class: 'confirm-sheet', role: 'dialog', 'aria-modal': 'true' });
+    if (title) sheet.appendChild(h('h3', { class: 'confirm-title' }, title));
+    if (body) sheet.appendChild(h('p', { class: 'confirm-body' }, body));
+
+    sheet.appendChild(h('div', { class: 'confirm-actions' },
+      h('button', {
+        type: 'button',
+        class: 'block ghost',
+        onClick: () => finish(false),
+      }, cancel),
+      h('button', {
+        type: 'button',
+        class: 'block ' + (primaryDanger ? 'danger' : 'primary'),
+        onClick: () => finish(true),
+      }, primary),
+    ));
+
+    scrim.appendChild(sheet);
+    document.body.appendChild(scrim);
+    // Next tick to enable the enter animation.
+    requestAnimationFrame(() => scrim.classList.add('open'));
+
+    // Esc dismisses.
+    const onKey = (e) => {
+      if (e.key === 'Escape') { finish(false); window.removeEventListener('keydown', onKey); }
+    };
+    window.addEventListener('keydown', onKey);
+  });
+}
+
 // ---- Router -----------------------------------------------------------------
 
 const ROUTES = new Set([
@@ -682,6 +754,23 @@ function viewHabit(id) {
 function render() {
   const app = qs('#app');
   app.replaceChildren();
+
+  // Pre-onboarding gate — null means first visit, show welcome.
+  if (state.settings.onboarded === null) {
+    hideChrome();
+    app.appendChild(renderWelcomeScreen());
+    return;
+  }
+
+  // Browser gate after onboarding — only run in the installed PWA.
+  if (state.settings.onboarded === true && !isInstalledPWA()) {
+    hideChrome();
+    app.appendChild(renderInstallGate());
+    return;
+  }
+
+  showChrome();
+
   if (route === 'habits') app.appendChild(renderManage());
   else if (route === 'diary') app.appendChild(renderDiary());
   else if (route === 'countdowns') app.appendChild(renderCountdowns());
@@ -692,6 +781,15 @@ function render() {
   updateTabbar();
   updateGear();
   updateAppBadge();
+}
+
+function hideChrome() {
+  const tabbar = qs('#tabbar'); if (tabbar) tabbar.hidden = true;
+  const gear = qs('#gear'); if (gear) gear.style.display = 'none';
+}
+
+function showChrome() {
+  const gear = qs('#gear'); if (gear) gear.style.display = '';
 }
 
 function updateTabbar() {
@@ -1694,10 +1792,15 @@ function unarchiveHabit(id) {
   });
 }
 
-function deleteHabitConfirm(id) {
+async function deleteHabitConfirm(id) {
   const habit = state.habits.find((x) => x.id === id);
   if (!habit) return;
-  const ok = confirm(`Delete "${habit.title}" and all its history permanently?`);
+  const ok = await showConfirm({
+    title: `Delete "${habit.title}"?`,
+    body: 'This removes the habit and all of its history. You can undo for 5 seconds after.',
+    primary: 'Delete',
+    primaryDanger: true,
+  });
   if (!ok) return;
 
   // Snapshot for undo
@@ -2127,10 +2230,16 @@ function unarchiveCountdown(id) {
   });
 }
 
-function deleteCountdownConfirm(id) {
+async function deleteCountdownConfirm(id) {
   const c = state.countdowns.find((x) => x.id === id);
   if (!c) return;
-  if (!confirm(`Delete "${c.title}"?`)) return;
+  const ok = await showConfirm({
+    title: `Delete "${c.title}"?`,
+    body: 'Removes this countdown permanently. You can undo for 5 seconds after.',
+    primary: 'Delete',
+    primaryDanger: true,
+  });
+  if (!ok) return;
   const snapshot = { ...c };
   state.countdowns = state.countdowns.filter((x) => x.id !== id);
   save();
@@ -3150,6 +3259,17 @@ function renderSettings() {
   }, 'Import from JSON'));
   view.appendChild(actions);
 
+  // --- Show tutorial again ---
+  view.appendChild(h('div', {
+    class: 'row',
+    style: { justifyContent: 'flex-start', marginTop: '24px' },
+  },
+    h('button', {
+      class: 'ghost small',
+      onClick: () => openOnboarding(),
+    }, 'Show tutorial again'),
+  ));
+
   // --- Danger zone (full reset) ---
   view.appendChild(renderDangerZone());
 
@@ -3370,14 +3490,19 @@ function renderDangerZone() {
 }
 
 async function deleteAllData() {
-  const first = confirm(
-    'Delete ALL Tempo data on this device?\n\n' +
-    'This removes habits, logs, diary entries, countdowns, reminders, and every setting. ' +
-    'It cannot be undone.\n\n' +
-    'Any exported JSON backup is NOT affected.',
-  );
+  const first = await showConfirm({
+    title: 'Delete all Tempo data?',
+    body: 'Removes every habit, log, diary entry, countdown, reminder, photo, and setting on this device.\n\nAny exported JSON backup is NOT affected.',
+    primary: 'Delete all',
+    primaryDanger: true,
+  });
   if (!first) return;
-  const second = confirm('Are you absolutely sure? This is permanent.');
+  const second = await showConfirm({
+    title: 'Are you absolutely sure?',
+    body: 'This is permanent and cannot be undone.',
+    primary: "Yes, wipe it",
+    primaryDanger: true,
+  });
   if (!second) return;
 
   try {
@@ -3391,8 +3516,11 @@ async function deleteAllData() {
     try { await clearAllPhotos(); } catch {}
     try { navigator.clearAppBadge?.(); } catch {}
 
-    // Reset in-memory state.
+    // Reset in-memory state — but remember the user already knows the app,
+    // so drop them into the tutorial instead of the welcome screen.
     state = defaultState();
+    state.settings.onboarded = false;
+    save();
 
     // Reset UI state flags so modals/edits don't linger.
     route = 'home';
@@ -3404,6 +3532,8 @@ async function deleteAllData() {
     checkInHabitBuffer = {};
     wrappedOpen = false;
     wrappedStage = 0;
+    onboardingOpen = false;
+    onboardingStage = 0;
     remindersBusy = false;
     if (typeof testTimer !== 'undefined' && testTimer) {
       try { clearTimeout(testTimer); } catch {}
@@ -3415,6 +3545,7 @@ async function deleteAllData() {
 
     applyTheme();
     render();
+    openOnboarding(); // onboarded=false → re-run tutorial
     toast('All data cleared');
   } catch (err) {
     console.error(err);
@@ -3446,9 +3577,12 @@ function handleImport(file) {
     const dayCount = Object.keys(data.logs).length;
     const photoCount = data._photos ? Object.keys(data._photos).length : 0;
     const photoLine = photoCount ? `, ${photoCount} photo${photoCount === 1 ? '' : 's'}` : '';
-    const ok = confirm(
-      `Import ${habitCount} habit${habitCount === 1 ? '' : 's'}, ${dayCount} day log${dayCount === 1 ? '' : 's'}${photoLine}?\n\nThis replaces your current data.`,
-    );
+    const ok = await showConfirm({
+      title: 'Import backup?',
+      body: `Will load ${habitCount} habit${habitCount === 1 ? '' : 's'}, ${dayCount} day log${dayCount === 1 ? '' : 's'}${photoLine}.\n\nThis replaces your current data on this device.`,
+      primary: 'Import',
+      primaryDanger: true,
+    });
     if (!ok) return;
 
     // Extract photos before storing state (so they don't live in localStorage).
@@ -4161,6 +4295,364 @@ function renderAppearanceSection() {
 
 // ---- Theme (system / dark / light) ------------------------------------------
 
+// ---- Onboarding + PWA install gate ------------------------------------------
+
+let deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  // Let a re-render pick up the "Install now" button if we're on the install gate.
+  if (state.settings.onboarded === true && !isInstalledPWA()) render();
+});
+window.addEventListener('appinstalled', () => {
+  deferredInstallPrompt = null;
+  render();
+});
+
+function isInstalledPWA() {
+  try {
+    if (window.matchMedia?.('(display-mode: standalone)').matches) return true;
+    if (window.navigator.standalone === true) return true; // iOS Safari
+  } catch {}
+  return false;
+}
+
+function renderWelcomeScreen() {
+  const view = h('div', { class: 'view welcome-view' });
+  view.appendChild(h('div', { class: 'welcome-hero' },
+    h('div', { class: 'welcome-emoji' }, '🌱'),
+    h('h1', { class: 'welcome-title' }, 'Welcome to Tempo'),
+    h('p', { class: 'welcome-sub' },
+      'A private habit + mood tracker. Everything stays on your device.'),
+  ));
+  view.appendChild(h('div', { class: 'stack', style: { marginTop: '24px' } },
+    h('button', {
+      class: 'primary block',
+      onClick: () => {
+        state.settings.onboarded = false;
+        save();
+        openOnboarding();
+      },
+    }, 'I\'m new — show me around'),
+    h('button', {
+      class: 'block ghost',
+      onClick: welcomeImportFlow,
+    }, 'I have a backup — import it'),
+  ));
+  return view;
+}
+
+async function welcomeImportFlow() {
+  const input = h('input', {
+    type: 'file', accept: 'application/json,.json',
+    style: { display: 'none' },
+  });
+  input.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    // handleImport handles validation + replaces state; flip onboarded=true after.
+    await handleImport(file);
+    // handleImport sets state via `state = ...` — if import was confirmed and
+    // applied, `state.settings.onboarded` may already be set from backup; but
+    // to make sure the user isn't sent to welcome again, force true when there
+    // was data imported.
+    if ((state.habits?.length || 0) > 0 || Object.keys(state.logs || {}).length > 0) {
+      state.settings.onboarded = true;
+      save();
+      render();
+    }
+  });
+  document.body.appendChild(input);
+  input.click();
+  setTimeout(() => input.remove(), 0);
+}
+
+// ---- Onboarding tutorial ----------------------------------------------------
+
+let onboardingOpen = false;
+let onboardingStage = 0;
+
+const ONBOARDING_STAGES = [
+  'intro',
+  'theme',
+  'notifications',
+  'install',
+  'backup',
+  'done',
+];
+
+function openOnboarding() {
+  onboardingOpen = true;
+  onboardingStage = 0;
+  renderOnboarding();
+}
+
+function closeOnboarding({ completed = false } = {}) {
+  onboardingOpen = false;
+  qsa('.onboarding-scrim').forEach((el) => el.remove());
+  if (completed) {
+    state.settings.onboarded = true;
+    save();
+  }
+  render();
+}
+
+function onboardingNext() {
+  if (onboardingStage >= ONBOARDING_STAGES.length - 1) {
+    closeOnboarding({ completed: true });
+    return;
+  }
+  onboardingStage++;
+  renderOnboarding();
+}
+
+function onboardingPrev() {
+  if (onboardingStage > 0) {
+    onboardingStage--;
+    renderOnboarding();
+  }
+}
+
+function renderOnboarding() {
+  qsa('.onboarding-scrim').forEach((el) => el.remove());
+  if (!onboardingOpen) return;
+
+  const stage = ONBOARDING_STAGES[onboardingStage];
+  const scrim = h('div', { class: 'scrim onboarding-scrim' });
+  const sheet = h('div', { class: 'sheet onboarding-sheet' });
+
+  // Header: progress dots + skip
+  const progress = h('div', { class: 'progress' });
+  for (let i = 0; i < ONBOARDING_STAGES.length; i++) {
+    progress.appendChild(h('span', { class: i <= onboardingStage ? 'active' : '' }));
+  }
+  sheet.appendChild(h('header', null,
+    progress,
+    h('button', {
+      class: 'ghost',
+      style: { padding: '6px 10px', minHeight: '36px' },
+      onClick: () => closeOnboarding({ completed: true }),
+      'aria-label': 'Skip tutorial',
+    }, 'Skip'),
+  ));
+
+  const body = h('div', { class: 'body' });
+  body.appendChild(renderOnboardingStage(stage));
+  sheet.appendChild(body);
+
+  // Footer: Back + Next (label varies by stage)
+  const footer = h('footer');
+  if (onboardingStage > 0) {
+    footer.appendChild(h('button', { class: 'ghost', onClick: onboardingPrev }, 'Back'));
+  }
+  footer.appendChild(h('span', { class: 'grow' }));
+  const lastStage = onboardingStage === ONBOARDING_STAGES.length - 1;
+  footer.appendChild(h('button', {
+    class: 'primary',
+    onClick: onboardingNext,
+  }, lastStage ? 'Start using Tempo' : 'Next'));
+  sheet.appendChild(footer);
+
+  scrim.appendChild(sheet);
+  document.body.appendChild(scrim);
+}
+
+function renderOnboardingStage(stage) {
+  const wrap = h('div', { class: 'step' });
+
+  if (stage === 'intro') {
+    wrap.appendChild(h('div', { class: 'onboarding-emoji' }, '🌱'));
+    wrap.appendChild(h('h2', null, 'Tempo in 30 seconds'));
+    wrap.appendChild(h('p', null,
+      'Each day you check in once: how you slept, how you feel, a quick prompt, your habits, and a tiny diary.'));
+    wrap.appendChild(h('p', { class: 'small muted' },
+      'Everything is stored on this device. No accounts, no cloud by default.'));
+    return wrap;
+  }
+
+  if (stage === 'theme') {
+    wrap.appendChild(h('div', { class: 'onboarding-emoji' }, '🎨'));
+    wrap.appendChild(h('h2', null, 'Pick a theme'));
+    wrap.appendChild(h('p', { class: 'small muted' },
+      'You can change this any time in Settings.'));
+    const options = [
+      { id: 'system', label: 'System' },
+      { id: 'dark',   label: 'Dark'   },
+      { id: 'light',  label: 'Light'  },
+    ];
+    const seg = h('div', { class: 'segmented', style: { marginTop: '12px' } });
+    options.forEach((opt) => {
+      seg.appendChild(h('button', {
+        type: 'button',
+        class: state.settings.theme === opt.id ? 'on' : '',
+        onClick: () => {
+          state.settings.theme = opt.id;
+          save();
+          applyTheme();
+          renderOnboarding();
+        },
+      }, opt.label));
+    });
+    wrap.appendChild(seg);
+    return wrap;
+  }
+
+  if (stage === 'notifications') {
+    wrap.appendChild(h('div', { class: 'onboarding-emoji' }, '🔔'));
+    wrap.appendChild(h('h2', null, 'Daily reminder'));
+    wrap.appendChild(h('p', null,
+      'Tempo can gently nudge you once a day in a time window you pick — morning, evening, etc. We pick a random minute inside the window so it never feels clockwork.'));
+
+    const r = state.settings.reminder || {};
+    const support = reminderSupport();
+    if (support !== 'ok') {
+      wrap.appendChild(h('p', { class: 'small muted' },
+        support === 'denied'
+          ? 'Notifications are currently blocked. You can enable them later in your browser settings.'
+          : 'Push notifications aren\'t supported in this browser. You\'ll still see in-app reminders.'));
+      return wrap;
+    }
+
+    wrap.appendChild(h('p', { class: 'small muted' }, 'Window'));
+    const list = h('div', { class: 'bucket-list' });
+    const selectedBucket = r.bucket || 'evening';
+    Object.entries(REMINDER_BUCKETS).forEach(([id, meta]) => {
+      list.appendChild(h('button', {
+        type: 'button',
+        class: 'bucket-option' + (selectedBucket === id ? ' selected' : ''),
+        onClick: () => {
+          state.settings.reminder = state.settings.reminder || {};
+          state.settings.reminder.bucket = id;
+          save();
+          renderOnboarding();
+        },
+      },
+        h('span', null, meta.label),
+        h('span', { class: 'bucket-hint' }, meta.hint),
+      ));
+    });
+    wrap.appendChild(list);
+
+    const alreadyOn = r.enabled && r.endpoint;
+    wrap.appendChild(h('button', {
+      class: 'primary block',
+      style: { marginTop: '12px' },
+      onClick: async () => {
+        try {
+          await enableReminders();
+        } catch (err) { /* enableReminders toasts on error */ }
+        renderOnboarding();
+      },
+      disabled: alreadyOn || undefined,
+    }, alreadyOn ? '✓ Reminders enabled' : 'Enable reminders'));
+    return wrap;
+  }
+
+  if (stage === 'install') {
+    wrap.appendChild(h('div', { class: 'onboarding-emoji' }, '📱'));
+    wrap.appendChild(h('h2', null, 'Add to home screen'));
+    wrap.appendChild(h('p', null,
+      'Tempo works best as an installed app — push notifications, offline support, a proper home-screen icon.'));
+    if (isInstalledPWA()) {
+      wrap.appendChild(h('p', { class: 'small muted' }, '✓ Already installed.'));
+    } else if (deferredInstallPrompt) {
+      wrap.appendChild(h('button', {
+        class: 'primary block',
+        style: { marginTop: '12px' },
+        onClick: async () => {
+          try {
+            await deferredInstallPrompt.prompt();
+            await deferredInstallPrompt.userChoice;
+          } catch {}
+          deferredInstallPrompt = null;
+          renderOnboarding();
+        },
+      }, 'Install now'));
+    } else {
+      wrap.appendChild(h('div', { class: 'prompt-card', style: { marginTop: '12px' } },
+        h('p', { style: { margin: 0, color: 'var(--text)', lineHeight: 1.5 } },
+          'Android Chrome: menu (⋮) → "Install app".'),
+        h('p', { style: { margin: '6px 0 0', color: 'var(--text)', lineHeight: 1.5 } },
+          'iOS Safari: share → "Add to Home Screen".'),
+      ));
+    }
+    return wrap;
+  }
+
+  if (stage === 'backup') {
+    wrap.appendChild(h('div', { class: 'onboarding-emoji' }, '💾'));
+    wrap.appendChild(h('h2', null, 'Back your data up'));
+    wrap.appendChild(h('p', null,
+      'Because everything stays local, a cleared browser or wiped device takes everything with it. Export a JSON backup now — we\'ll remind you monthly afterwards.'));
+    const last = state.settings.lastExportAt;
+    wrap.appendChild(h('button', {
+      class: 'primary block',
+      style: { marginTop: '12px' },
+      onClick: async () => {
+        await exportJSON();
+        renderOnboarding();
+      },
+    }, last ? 'Export again' : 'Export backup now'));
+    if (last) {
+      wrap.appendChild(h('p', { class: 'small muted', style: { marginTop: '8px' } },
+        `Last export ${daysSince(last)} days ago.`));
+    }
+    return wrap;
+  }
+
+  if (stage === 'done') {
+    wrap.appendChild(h('div', { class: 'onboarding-emoji' }, '🎉'));
+    wrap.appendChild(h('h2', null, 'You\'re all set'));
+    wrap.appendChild(h('p', null,
+      'Tap "Start using Tempo" below. Your first check-in is waiting on the Today screen.'));
+    wrap.appendChild(h('p', { class: 'small muted' },
+      'Can always re-open the tutorial from Settings → Show tutorial again.'));
+    return wrap;
+  }
+
+  return wrap;
+}
+
+function renderInstallGate() {
+  const view = h('div', { class: 'view install-gate' });
+  view.appendChild(h('div', { class: 'welcome-hero' },
+    h('div', { class: 'welcome-emoji' }, '📱'),
+    h('h1', { class: 'welcome-title' }, 'Add Tempo to your home screen'),
+    h('p', { class: 'welcome-sub' },
+      'Tempo is designed to run as an installed app — not in a browser tab. Install it to continue.'),
+  ));
+
+  const actions = h('div', { class: 'stack', style: { marginTop: '20px' } });
+
+  if (deferredInstallPrompt) {
+    actions.appendChild(h('button', {
+      class: 'primary block',
+      onClick: async () => {
+        try {
+          await deferredInstallPrompt.prompt();
+          await deferredInstallPrompt.userChoice;
+        } catch {}
+        deferredInstallPrompt = null;
+        render();
+      },
+    }, 'Install Tempo'));
+  }
+
+  actions.appendChild(h('div', { class: 'prompt-card' },
+    h('div', { class: 'kicker' }, 'How to install'),
+    h('p', { style: { margin: '8px 0 0', color: 'var(--text)', lineHeight: 1.5 } },
+      'Android Chrome: menu (⋮) → "Install app" or "Add to Home screen".'),
+    h('p', { style: { margin: '6px 0 0', color: 'var(--text)', lineHeight: 1.5 } },
+      'iOS Safari: share sheet → "Add to Home Screen".'),
+    h('p', { style: { margin: '6px 0 0', color: 'var(--text)', lineHeight: 1.5 } },
+      'Desktop Chrome / Edge: icon in the address bar.'),
+  ));
+
+  view.appendChild(actions);
+  return view;
+}
+
 function resolvedTheme(pref) {
   if (pref === 'dark' || pref === 'light') return pref;
   // 'system' (or anything else): follow OS preference.
@@ -4200,7 +4692,12 @@ function init() {
   reconcileCountdowns();
   render();
   registerSW();
-  maybeOpenCheckIn();
+  // Resume onboarding for users mid-setup.
+  if (state.settings.onboarded === false) {
+    openOnboarding();
+  } else if (state.settings.onboarded === true) {
+    maybeOpenCheckIn();
+  }
 }
 
 init();
