@@ -340,6 +340,35 @@ label { display: block; font-size: 0.85rem; color: var(--muted); margin: 12px 0 
   transform: rotate(90deg);
 }
 
+/* Habit reorder arrows on the Manage list */
+.habit-reorder {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.reorder-btn {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  width: 32px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+}
+.reorder-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.reorder-btn:not(:disabled):hover {
+  color: var(--text);
+  border-color: color-mix(in oklab, var(--accent) 40%, var(--border));
+}
+
 /* Habit template picker (empty-state of Habits tab) */
 .template-grid {
   display: grid;

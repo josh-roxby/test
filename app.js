@@ -168,6 +168,7 @@ function installHabitTemplate(templateId) {
   const tpl = HABIT_TEMPLATES.find((t) => t.id === templateId);
   if (!tpl) return;
   const createdAt = new Date().toISOString();
+  let order = state.habits.reduce((m, ht) => Math.max(m, ht.order ?? 0), 0);
   const installed = tpl.habits.map((seed) => ({
     id: uid(),
     title: seed.title,
@@ -177,6 +178,7 @@ function installHabitTemplate(templateId) {
     target: seed.target ?? 1,
     unit: seed.unit || '',
     color: seed.color,
+    order: ++order,
     createdAt,
     archivedAt: null,
   }));
@@ -863,7 +865,7 @@ function renderHome() {
   // 2×2 glanceable tile grid (Diary · Habits · Countdowns · Reports)
   view.appendChild(renderGlancableTiles());
 
-  const active = state.habits.filter((x) => !x.archivedAt);
+  const active = habitsSorted(state.habits.filter((x) => !x.archivedAt));
 
   if (active.length === 0) {
     view.appendChild(h('div', { class: 'summary', style: { marginTop: '8px' } },
@@ -1229,7 +1231,7 @@ function renderManage() {
     h('button', { class: 'primary', onClick: startNewHabit }, '+ New'),
   ));
 
-  const active = state.habits.filter((x) => !x.archivedAt);
+  const active = habitsSorted(state.habits.filter((x) => !x.archivedAt));
   const archived = state.habits.filter((x) => x.archivedAt);
 
   if (active.length === 0 && archived.length === 0) {
@@ -1264,11 +1266,59 @@ function renderManageSection(title, kindClass, habits) {
   );
 }
 
+function habitsSorted(list) {
+  return list.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+}
+
+function ensureHabitOrders() {
+  let changed = false;
+  let maxOrder = 0;
+  for (const ht of state.habits) {
+    if (typeof ht.order === 'number' && ht.order > maxOrder) maxOrder = ht.order;
+  }
+  for (const ht of state.habits) {
+    if (typeof ht.order !== 'number') {
+      ht.order = ++maxOrder;
+      changed = true;
+    }
+  }
+  if (changed) save();
+}
+
+function moveHabit(id, direction) {
+  const habit = state.habits.find((x) => x.id === id);
+  if (!habit) return;
+  const siblings = habitsSorted(
+    state.habits.filter((x) => x.kind === habit.kind && !x.archivedAt),
+  );
+  const idx = siblings.findIndex((x) => x.id === id);
+  const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+  if (swapIdx < 0 || swapIdx >= siblings.length) return;
+  const other = siblings[swapIdx];
+  const tmp = habit.order;
+  habit.order = other.order;
+  other.order = tmp;
+  save();
+  render();
+}
+
 function renderManageHabitCard(habit) {
+  const siblings = habitsSorted(
+    state.habits.filter((x) => x.kind === habit.kind && !x.archivedAt),
+  );
+  const idx = siblings.findIndex((x) => x.id === habit.id);
+  const canUp = idx > 0;
+  const canDown = idx >= 0 && idx < siblings.length - 1;
+  const isActive = !habit.archivedAt;
+
   return h('div', {
       class: `habit ${habit.kind}${habit.archivedAt ? ' archived' : ''}`,
       style: { '--habit-color': habit.color },
-      onClick: () => startEditHabit(habit.id),
+      onClick: (e) => {
+        // Avoid hijacking taps on the reorder controls.
+        if (e.target.closest('.habit-reorder')) return;
+        startEditHabit(habit.id);
+      },
       role: 'button',
       tabindex: '0',
     },
@@ -1277,7 +1327,24 @@ function renderManageHabitCard(habit) {
       h('div', { class: 'title' }, habit.title),
       h('div', { class: 'meta' }, habitMeta(habit)),
     ),
-    h('div', { class: 'state' }, '›'),
+    isActive
+      ? h('div', { class: 'habit-reorder' },
+          h('button', {
+            type: 'button',
+            class: 'reorder-btn',
+            disabled: !canUp,
+            'aria-label': 'Move up',
+            onClick: (e) => { e.stopPropagation(); moveHabit(habit.id, 'up'); },
+          }, '▲'),
+          h('button', {
+            type: 'button',
+            class: 'reorder-btn',
+            disabled: !canDown,
+            'aria-label': 'Move down',
+            onClick: (e) => { e.stopPropagation(); moveHabit(habit.id, 'down'); },
+          }, '▼'),
+        )
+      : h('div', { class: 'state' }, '›'),
   );
 }
 
@@ -1458,10 +1525,18 @@ function saveHabitDraft(draft, isNew) {
   if (draft.type !== 'count') draft.unit = '';
 
   if (isNew) {
+    if (typeof draft.order !== 'number') {
+      const maxOrder = state.habits.reduce((m, ht) => Math.max(m, ht.order ?? 0), 0);
+      draft.order = maxOrder + 1;
+    }
     state.habits.push(draft);
   } else {
     const i = state.habits.findIndex((x) => x.id === draft.id);
-    if (i >= 0) state.habits[i] = draft;
+    if (i >= 0) {
+      // Preserve existing order field.
+      if (typeof draft.order !== 'number') draft.order = state.habits[i].order;
+      state.habits[i] = draft;
+    }
   }
   save();
   editingHabitId = null;
@@ -2538,7 +2613,7 @@ function renderStatsPills(kind, valid, total) {
 
 function renderReportsHabits() {
   const wrap = h('div');
-  const active = state.habits.filter((x) => !x.archivedAt);
+  const active = habitsSorted(state.habits.filter((x) => !x.archivedAt));
 
   if (active.length === 0) {
     wrap.appendChild(h('p', { class: 'small muted' },
@@ -3395,7 +3470,7 @@ function renderHabitsStep() {
   wrap.appendChild(h('p', { class: 'small muted', style: { marginBottom: '12px' } },
     'Check off what happened. Skip any you don\'t want to track today.'));
 
-  const active = state.habits.filter((x) => !x.archivedAt);
+  const active = habitsSorted(state.habits.filter((x) => !x.archivedAt));
   if (active.length === 0) {
     wrap.appendChild(h('p', 'No habits yet. Add some in the Habits tab.'));
     return wrap;
@@ -3758,6 +3833,7 @@ function wireThemeMediaListener() {
 }
 
 function init() {
+  ensureHabitOrders();
   applyTheme();
   wireThemeMediaListener();
   wireTabbar();
