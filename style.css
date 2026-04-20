@@ -340,6 +340,61 @@ label { display: block; font-size: 0.85rem; color: var(--muted); margin: 12px 0 
   transform: rotate(90deg);
 }
 
+/* Habit template picker (empty-state of Habits tab) */
+.template-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+@media (max-width: 340px) {
+  .template-grid { grid-template-columns: 1fr; }
+}
+.template-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  min-height: 130px;
+}
+.template-card:hover {
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
+}
+.template-emoji {
+  font-size: 1.6rem;
+  line-height: 1;
+  margin-bottom: 2px;
+}
+.template-title {
+  font-weight: 600;
+  font-size: 0.98rem;
+}
+.template-desc {
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.35;
+  margin-bottom: 4px;
+}
+.template-habits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.template-habit-pill {
+  font-size: 0.7rem;
+  color: var(--muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
 /* Reminder bucket picker (card list) */
 .bucket-list { display: grid; gap: 6px; }
 .bucket-option {

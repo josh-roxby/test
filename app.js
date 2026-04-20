@@ -115,6 +115,110 @@ function inferBucketFromTime(hhmm) {
   return 'night';
 }
 
+// Habit templates — starter packs for new users. Each template seeds a list
+// of habits the user can edit or delete like any other.
+const HABIT_TEMPLATES = [
+  {
+    id: 'morning',
+    title: 'Morning Routine',
+    emoji: '🌅',
+    description: 'Start the day with intention.',
+    habits: [
+      { title: 'Morning walk',  kind: 'good', type: 'count', target: 1, unit: 'walks',   color: '#86efac' },
+      { title: 'Meditation',    kind: 'good', type: 'tick',                              color: '#c084fc' },
+      { title: 'Water',         kind: 'good', type: 'count', target: 8, unit: 'glasses', color: '#7c9cff' },
+    ],
+  },
+  {
+    id: 'sleep',
+    title: 'Better Sleep',
+    emoji: '😴',
+    description: 'Wind down, rest well.',
+    habits: [
+      { title: 'No phone in bed',      kind: 'good', type: 'tick',                                  color: '#a78bfa' },
+      { title: 'Screens after 9pm',    kind: 'bad',  type: 'count',   target: 30, unit: 'minutes',  color: '#f87171' },
+      { title: 'Bed by 11pm',          kind: 'good', type: 'tick',                                  color: '#5eead4' },
+    ],
+  },
+  {
+    id: 'focus',
+    title: 'Focus Block',
+    emoji: '🎯',
+    description: 'Fewer distractions, deeper work.',
+    habits: [
+      { title: 'Deep work blocks', kind: 'good', type: 'count',   target: 2,  unit: 'blocks', color: '#fbbf24' },
+      { title: 'Social media',     kind: 'bad',  type: 'percent', target: 20,                color: '#f472b6' },
+      { title: 'Review to-dos',    kind: 'good', type: 'tick',                                color: '#7c9cff' },
+    ],
+  },
+  {
+    id: 'kindness',
+    title: 'Small Kindnesses',
+    emoji: '💛',
+    description: 'Tiny acts, bigger heart.',
+    habits: [
+      { title: 'Gratitude note',      kind: 'good', type: 'tick', color: '#fde047' },
+      { title: 'Compliment someone',  kind: 'good', type: 'tick', color: '#fb923c' },
+      { title: 'Reach out to a friend', kind: 'good', type: 'tick', color: '#86efac' },
+    ],
+  },
+];
+
+function installHabitTemplate(templateId) {
+  const tpl = HABIT_TEMPLATES.find((t) => t.id === templateId);
+  if (!tpl) return;
+  const createdAt = new Date().toISOString();
+  const installed = tpl.habits.map((seed) => ({
+    id: uid(),
+    title: seed.title,
+    description: '',
+    kind: seed.kind,
+    type: seed.type,
+    target: seed.target ?? 1,
+    unit: seed.unit || '',
+    color: seed.color,
+    createdAt,
+    archivedAt: null,
+  }));
+  state.habits.push(...installed);
+  save();
+  render();
+  toast(`${tpl.title} installed`);
+}
+
+function confirmInstallTemplate(templateId) {
+  const tpl = HABIT_TEMPLATES.find((t) => t.id === templateId);
+  if (!tpl) return;
+  const list = tpl.habits.map((h) => `• ${h.title}`).join('\n');
+  const ok = confirm(
+    `Install "${tpl.title}" starter pack?\n\n${list}\n\nYou can edit or delete any of these afterwards.`,
+  );
+  if (ok) installHabitTemplate(templateId);
+}
+
+function renderTemplatesSection() {
+  const wrap = h('section', { class: 'section', style: { marginTop: '20px' } });
+  wrap.appendChild(h('div', { class: 'section-head' }, 'Or start with a template'));
+  const grid = h('div', { class: 'template-grid' });
+  HABIT_TEMPLATES.forEach((tpl) => {
+    const card = h('button', {
+      class: 'template-card',
+      type: 'button',
+      onClick: () => confirmInstallTemplate(tpl.id),
+    },
+      h('div', { class: 'template-emoji' }, tpl.emoji),
+      h('div', { class: 'template-title' }, tpl.title),
+      h('div', { class: 'template-desc' }, tpl.description),
+      h('div', { class: 'template-habits' },
+        tpl.habits.map((seed) => h('span', { class: 'template-habit-pill' }, seed.title)),
+      ),
+    );
+    grid.appendChild(card);
+  });
+  wrap.appendChild(grid);
+  return wrap;
+}
+
 const CHECKIN_STEPS = ['sleep', 'mood', 'prompt', 'habits', 'diary'];
 // + an implicit 'summary' step after all of the above.
 
@@ -1129,13 +1233,12 @@ function renderManage() {
   const archived = state.habits.filter((x) => x.archivedAt);
 
   if (active.length === 0 && archived.length === 0) {
-    view.appendChild(h('div', { class: 'stack', style: { marginTop: '24px' } },
-      h('p', 'No habits yet. Tap "+ New" to add one.'),
+    view.appendChild(h('div', { class: 'stack', style: { marginTop: '16px' } },
+      h('p', 'No habits yet. Tap "+ New" to add one from scratch.'),
       h('p', { class: 'small muted' },
-        'Good habits you want to build (like "Morning walk") and bad habits you want to break (like "Doomscrolling") both live here.'),
-      h('p', { class: 'small muted' },
-        'Tracking types — Tick (did or didn\'t), Count (e.g. 4 walks), Percent (e.g. 90% urges logged).'),
+        'Good habits you want to build (like "Morning walk") and bad habits you want to break (like "Doomscrolling") both live here. Tracking types — Tick (did / didn\'t), Count (e.g. 4 walks), Percent (e.g. 90% urges logged).'),
     ));
+    view.appendChild(renderTemplatesSection());
     return view;
   }
 
