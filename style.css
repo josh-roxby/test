@@ -198,6 +198,47 @@ label { display: block; font-size: 0.85rem; color: var(--muted); margin: 12px 0 
 .habit.done .state { color: var(--good); font-weight: 700; }
 .habit.bad.done .state { color: var(--good); font-weight: 700; }
 
+/* Swipe feedback on Today habit cards */
+.habit {
+  position: relative;
+  z-index: 1;
+  touch-action: pan-y; /* let vertical scroll through, we handle horizontal */
+}
+.habit[data-swipe="right"] {
+  background: color-mix(in oklab, var(--good) 14%, var(--surface));
+  border-color: color-mix(in oklab, var(--good) 45%, var(--border));
+}
+.habit[data-swipe="left"] {
+  background: color-mix(in oklab, var(--bad) 14%, var(--surface));
+  border-color: color-mix(in oklab, var(--bad) 45%, var(--border));
+}
+
+/* Quick-log pill (interactive state on Today cards) */
+.habit-state-btn {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 6px 12px;
+  min-height: 34px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  justify-self: end;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.habit-state-btn.logged {
+  color: var(--text);
+  border-color: color-mix(in oklab, var(--habit-color, var(--accent)) 35%, var(--border));
+}
+.habit-state-btn.done {
+  background: color-mix(in oklab, var(--good) 20%, var(--surface-2));
+  color: var(--good);
+  border-color: color-mix(in oklab, var(--good) 40%, var(--border));
+  font-weight: 700;
+}
+
 /* Heatmap */
 .heatmap {
   display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 1fr);
@@ -338,6 +379,120 @@ label { display: block; font-size: 0.85rem; color: var(--muted); margin: 12px 0 
 }
 .reminder-details[open] summary::before {
   transform: rotate(90deg);
+}
+
+/* Habit reorder arrows on the Manage list */
+.habit-reorder {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.reorder-btn {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  width: 32px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+}
+.reorder-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.reorder-btn:not(:disabled):hover {
+  color: var(--text);
+  border-color: color-mix(in oklab, var(--accent) 40%, var(--border));
+}
+
+/* Diary photo (check-in step preview + timeline thumbnail) */
+.diary-photo-preview {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.diary-photo-preview img {
+  max-width: 100%;
+  max-height: 260px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  object-fit: cover;
+}
+.diary-photo-thumb {
+  margin-top: 10px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  min-height: 80px;
+}
+.diary-photo-thumb img {
+  display: block;
+  width: 100%;
+  max-height: 200px;
+  object-fit: cover;
+}
+
+/* Habit template picker (empty-state of Habits tab) */
+.template-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+@media (max-width: 340px) {
+  .template-grid { grid-template-columns: 1fr; }
+}
+.template-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  min-height: 130px;
+}
+.template-card:hover {
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
+}
+.template-emoji {
+  font-size: 1.6rem;
+  line-height: 1;
+  margin-bottom: 2px;
+}
+.template-title {
+  font-weight: 600;
+  font-size: 0.98rem;
+}
+.template-desc {
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.35;
+  margin-bottom: 4px;
+}
+.template-habits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.template-habit-pill {
+  font-size: 0.7rem;
+  color: var(--muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
 }
 
 /* Reminder bucket picker (card list) */

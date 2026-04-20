@@ -115,6 +115,112 @@ function inferBucketFromTime(hhmm) {
   return 'night';
 }
 
+// Habit templates — starter packs for new users. Each template seeds a list
+// of habits the user can edit or delete like any other.
+const HABIT_TEMPLATES = [
+  {
+    id: 'morning',
+    title: 'Morning Routine',
+    emoji: '🌅',
+    description: 'Start the day with intention.',
+    habits: [
+      { title: 'Morning walk',  kind: 'good', type: 'count', target: 1, unit: 'walks',   color: '#86efac' },
+      { title: 'Meditation',    kind: 'good', type: 'tick',                              color: '#c084fc' },
+      { title: 'Water',         kind: 'good', type: 'count', target: 8, unit: 'glasses', color: '#7c9cff' },
+    ],
+  },
+  {
+    id: 'sleep',
+    title: 'Better Sleep',
+    emoji: '😴',
+    description: 'Wind down, rest well.',
+    habits: [
+      { title: 'No phone in bed',      kind: 'good', type: 'tick',                                  color: '#a78bfa' },
+      { title: 'Screens after 9pm',    kind: 'bad',  type: 'count',   target: 30, unit: 'minutes',  color: '#f87171' },
+      { title: 'Bed by 11pm',          kind: 'good', type: 'tick',                                  color: '#5eead4' },
+    ],
+  },
+  {
+    id: 'focus',
+    title: 'Focus Block',
+    emoji: '🎯',
+    description: 'Fewer distractions, deeper work.',
+    habits: [
+      { title: 'Deep work blocks', kind: 'good', type: 'count',   target: 2,  unit: 'blocks', color: '#fbbf24' },
+      { title: 'Social media',     kind: 'bad',  type: 'percent', target: 20,                color: '#f472b6' },
+      { title: 'Review to-dos',    kind: 'good', type: 'tick',                                color: '#7c9cff' },
+    ],
+  },
+  {
+    id: 'kindness',
+    title: 'Small Kindnesses',
+    emoji: '💛',
+    description: 'Tiny acts, bigger heart.',
+    habits: [
+      { title: 'Gratitude note',      kind: 'good', type: 'tick', color: '#fde047' },
+      { title: 'Compliment someone',  kind: 'good', type: 'tick', color: '#fb923c' },
+      { title: 'Reach out to a friend', kind: 'good', type: 'tick', color: '#86efac' },
+    ],
+  },
+];
+
+function installHabitTemplate(templateId) {
+  const tpl = HABIT_TEMPLATES.find((t) => t.id === templateId);
+  if (!tpl) return;
+  const createdAt = new Date().toISOString();
+  let order = state.habits.reduce((m, ht) => Math.max(m, ht.order ?? 0), 0);
+  const installed = tpl.habits.map((seed) => ({
+    id: uid(),
+    title: seed.title,
+    description: '',
+    kind: seed.kind,
+    type: seed.type,
+    target: seed.target ?? 1,
+    unit: seed.unit || '',
+    color: seed.color,
+    order: ++order,
+    createdAt,
+    archivedAt: null,
+  }));
+  state.habits.push(...installed);
+  save();
+  render();
+  toast(`${tpl.title} installed`);
+}
+
+function confirmInstallTemplate(templateId) {
+  const tpl = HABIT_TEMPLATES.find((t) => t.id === templateId);
+  if (!tpl) return;
+  const list = tpl.habits.map((h) => `• ${h.title}`).join('\n');
+  const ok = confirm(
+    `Install "${tpl.title}" starter pack?\n\n${list}\n\nYou can edit or delete any of these afterwards.`,
+  );
+  if (ok) installHabitTemplate(templateId);
+}
+
+function renderTemplatesSection() {
+  const wrap = h('section', { class: 'section', style: { marginTop: '20px' } });
+  wrap.appendChild(h('div', { class: 'section-head' }, 'Or start with a template'));
+  const grid = h('div', { class: 'template-grid' });
+  HABIT_TEMPLATES.forEach((tpl) => {
+    const card = h('button', {
+      class: 'template-card',
+      type: 'button',
+      onClick: () => confirmInstallTemplate(tpl.id),
+    },
+      h('div', { class: 'template-emoji' }, tpl.emoji),
+      h('div', { class: 'template-title' }, tpl.title),
+      h('div', { class: 'template-desc' }, tpl.description),
+      h('div', { class: 'template-habits' },
+        tpl.habits.map((seed) => h('span', { class: 'template-habit-pill' }, seed.title)),
+      ),
+    );
+    grid.appendChild(card);
+  });
+  wrap.appendChild(grid);
+  return wrap;
+}
+
 const CHECKIN_STEPS = ['sleep', 'mood', 'prompt', 'habits', 'diary'];
 // + an implicit 'summary' step after all of the above.
 
@@ -759,7 +865,7 @@ function renderHome() {
   // 2×2 glanceable tile grid (Diary · Habits · Countdowns · Reports)
   view.appendChild(renderGlancableTiles());
 
-  const active = state.habits.filter((x) => !x.archivedAt);
+  const active = habitsSorted(state.habits.filter((x) => !x.archivedAt));
 
   if (active.length === 0) {
     view.appendChild(h('div', { class: 'summary', style: { marginTop: '8px' } },
@@ -973,17 +1079,118 @@ function renderHomeStatsCard() {
   );
 }
 
+function quickLogHabit(habit) {
+  const log = ensureTodayLog();
+  log.habits = log.habits || {};
+  const prev = log.habits[habit.id];
+  const revert = () => {
+    if (prev === undefined) delete log.habits[habit.id];
+    else log.habits[habit.id] = prev;
+    save();
+    render();
+  };
+
+  if (habit.type === 'tick') {
+    const next = !prev;
+    log.habits[habit.id] = next;
+    log.steps.habits = true;
+    save();
+    render();
+    toast(next ? 'Marked done' : 'Cleared', { action: 'Undo', onAction: revert });
+    return;
+  }
+
+  if (habit.type === 'count') {
+    const next = (Number(prev) || 0) + 1;
+    log.habits[habit.id] = next;
+    log.steps.habits = true;
+    save();
+    render();
+    const unit = habit.unit ? ` ${habit.unit}` : '';
+    toast(`+1 · ${next}/${habit.target}${unit}`, { action: 'Undo', onAction: revert });
+    return;
+  }
+
+  // Percent doesn't quick-log naturally — open the detail view so the user
+  // can enter a precise number.
+  viewHabit(habit.id);
+}
+
+function clearHabitToday(habit) {
+  const log = state.logs[currentDayKey()];
+  if (!log?.habits || log.habits[habit.id] === undefined) return;
+  const prev = log.habits[habit.id];
+  delete log.habits[habit.id];
+  save();
+  render();
+  toast('Cleared', {
+    action: 'Undo',
+    onAction: () => {
+      log.habits[habit.id] = prev;
+      save();
+      render();
+    },
+  });
+}
+
+// Attach horizontal swipe handlers to a habit card. Swipe right → quick-log,
+// swipe left → clear today. Vertical-majority moves fall through to scrolling.
+function attachHabitSwipe(card, habit) {
+  let startX = 0, startY = 0, dx = 0, dy = 0, engaged = false;
+  const THRESHOLD = 60;
+
+  card.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) return;
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    dx = 0; dy = 0; engaged = false;
+    card.style.transition = 'none';
+  }, { passive: true });
+
+  card.addEventListener('touchmove', (e) => {
+    if (e.touches.length !== 1) return;
+    dx = e.touches[0].clientX - startX;
+    dy = e.touches[0].clientY - startY;
+    if (!engaged && Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      engaged = true;
+    }
+    if (engaged) {
+      e.preventDefault();
+      card.style.transform = `translateX(${dx * 0.6}px)`;
+      card.dataset.swipe = dx > 0 ? 'right' : 'left';
+    }
+  }, { passive: false });
+
+  const reset = () => {
+    card.style.transition = 'transform 0.2s ease';
+    card.style.transform = '';
+    delete card.dataset.swipe;
+    engaged = false;
+  };
+
+  card.addEventListener('touchend', () => {
+    if (engaged && Math.abs(dx) > THRESHOLD) {
+      if (dx > 0) quickLogHabit(habit);
+      else clearHabitToday(habit);
+    }
+    reset();
+  });
+
+  card.addEventListener('touchcancel', reset);
+}
+
 function renderHomeHabitCard(habit) {
   const today = currentDayKey();
   const done = isHabitDoneForDay(habit, today);
   const streak = currentStreak(habit);
+  const logged = habitValueForDay(habit, today) !== undefined;
 
-  return h('div', {
+  const card = h('div', {
       class: `habit ${habit.kind}${done ? ' done' : ''}`,
       style: { '--habit-color': habit.color },
       role: 'button',
       tabindex: '0',
-      'aria-label': `${habit.title} — open details`,
+      'aria-label': `${habit.title} — open details (swipe right to log, left to clear)`,
       onClick: () => viewHabit(habit.id),
     },
     h('div', { class: 'stripe' }),
@@ -996,8 +1203,21 @@ function renderHomeHabitCard(habit) {
           )
         : null,
     ),
-    h('div', { class: 'state' }, todayStateText(habit)),
+    h('button', {
+      type: 'button',
+      class: 'habit-state-btn' + (logged ? ' logged' : '') + (done ? ' done' : ''),
+      'aria-label': habit.type === 'percent'
+        ? `${habit.title} — open to log percentage`
+        : `${habit.title} — tap to log`,
+      onClick: (e) => {
+        e.stopPropagation();
+        quickLogHabit(habit);
+      },
+    }, todayStateText(habit)),
   );
+
+  attachHabitSwipe(card, habit);
+  return card;
 }
 
 function renderHeatmap(habit) {
@@ -1125,17 +1345,16 @@ function renderManage() {
     h('button', { class: 'primary', onClick: startNewHabit }, '+ New'),
   ));
 
-  const active = state.habits.filter((x) => !x.archivedAt);
+  const active = habitsSorted(state.habits.filter((x) => !x.archivedAt));
   const archived = state.habits.filter((x) => x.archivedAt);
 
   if (active.length === 0 && archived.length === 0) {
-    view.appendChild(h('div', { class: 'stack', style: { marginTop: '24px' } },
-      h('p', 'No habits yet. Tap "+ New" to add one.'),
+    view.appendChild(h('div', { class: 'stack', style: { marginTop: '16px' } },
+      h('p', 'No habits yet. Tap "+ New" to add one from scratch.'),
       h('p', { class: 'small muted' },
-        'Good habits you want to build (like "Morning walk") and bad habits you want to break (like "Doomscrolling") both live here.'),
-      h('p', { class: 'small muted' },
-        'Tracking types — Tick (did or didn\'t), Count (e.g. 4 walks), Percent (e.g. 90% urges logged).'),
+        'Good habits you want to build (like "Morning walk") and bad habits you want to break (like "Doomscrolling") both live here. Tracking types — Tick (did / didn\'t), Count (e.g. 4 walks), Percent (e.g. 90% urges logged).'),
     ));
+    view.appendChild(renderTemplatesSection());
     return view;
   }
 
@@ -1161,11 +1380,59 @@ function renderManageSection(title, kindClass, habits) {
   );
 }
 
+function habitsSorted(list) {
+  return list.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+}
+
+function ensureHabitOrders() {
+  let changed = false;
+  let maxOrder = 0;
+  for (const ht of state.habits) {
+    if (typeof ht.order === 'number' && ht.order > maxOrder) maxOrder = ht.order;
+  }
+  for (const ht of state.habits) {
+    if (typeof ht.order !== 'number') {
+      ht.order = ++maxOrder;
+      changed = true;
+    }
+  }
+  if (changed) save();
+}
+
+function moveHabit(id, direction) {
+  const habit = state.habits.find((x) => x.id === id);
+  if (!habit) return;
+  const siblings = habitsSorted(
+    state.habits.filter((x) => x.kind === habit.kind && !x.archivedAt),
+  );
+  const idx = siblings.findIndex((x) => x.id === id);
+  const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+  if (swapIdx < 0 || swapIdx >= siblings.length) return;
+  const other = siblings[swapIdx];
+  const tmp = habit.order;
+  habit.order = other.order;
+  other.order = tmp;
+  save();
+  render();
+}
+
 function renderManageHabitCard(habit) {
+  const siblings = habitsSorted(
+    state.habits.filter((x) => x.kind === habit.kind && !x.archivedAt),
+  );
+  const idx = siblings.findIndex((x) => x.id === habit.id);
+  const canUp = idx > 0;
+  const canDown = idx >= 0 && idx < siblings.length - 1;
+  const isActive = !habit.archivedAt;
+
   return h('div', {
       class: `habit ${habit.kind}${habit.archivedAt ? ' archived' : ''}`,
       style: { '--habit-color': habit.color },
-      onClick: () => startEditHabit(habit.id),
+      onClick: (e) => {
+        // Avoid hijacking taps on the reorder controls.
+        if (e.target.closest('.habit-reorder')) return;
+        startEditHabit(habit.id);
+      },
       role: 'button',
       tabindex: '0',
     },
@@ -1174,7 +1441,24 @@ function renderManageHabitCard(habit) {
       h('div', { class: 'title' }, habit.title),
       h('div', { class: 'meta' }, habitMeta(habit)),
     ),
-    h('div', { class: 'state' }, '›'),
+    isActive
+      ? h('div', { class: 'habit-reorder' },
+          h('button', {
+            type: 'button',
+            class: 'reorder-btn',
+            disabled: !canUp,
+            'aria-label': 'Move up',
+            onClick: (e) => { e.stopPropagation(); moveHabit(habit.id, 'up'); },
+          }, '▲'),
+          h('button', {
+            type: 'button',
+            class: 'reorder-btn',
+            disabled: !canDown,
+            'aria-label': 'Move down',
+            onClick: (e) => { e.stopPropagation(); moveHabit(habit.id, 'down'); },
+          }, '▼'),
+        )
+      : h('div', { class: 'state' }, '›'),
   );
 }
 
@@ -1355,10 +1639,18 @@ function saveHabitDraft(draft, isNew) {
   if (draft.type !== 'count') draft.unit = '';
 
   if (isNew) {
+    if (typeof draft.order !== 'number') {
+      const maxOrder = state.habits.reduce((m, ht) => Math.max(m, ht.order ?? 0), 0);
+      draft.order = maxOrder + 1;
+    }
     state.habits.push(draft);
   } else {
     const i = state.habits.findIndex((x) => x.id === draft.id);
-    if (i >= 0) state.habits[i] = draft;
+    if (i >= 0) {
+      // Preserve existing order field.
+      if (typeof draft.order !== 'number') draft.order = state.habits[i].order;
+      state.habits[i] = draft;
+    }
   }
   save();
   editingHabitId = null;
@@ -1522,6 +1814,20 @@ function renderDiaryCard(dayKey) {
     card.appendChild(h('p', {
       style: { margin: 0, color: 'var(--text)', lineHeight: 1.45 },
     }, h('span', { class: 'kicker' }, 'Challenge'), ' ', diary.challenge));
+  }
+
+  if (diary.hasPhoto) {
+    const photoEl = h('div', { class: 'diary-photo-thumb' });
+    card.appendChild(photoEl);
+    getPhoto(dayKey).then((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      photoEl.replaceChildren(h('img', {
+        src: url,
+        alt: 'Diary photo',
+        onLoad: () => { /* leave URL alive for the card's life */ },
+      }));
+    });
   }
 
   if (isToday) {
@@ -2435,7 +2741,7 @@ function renderStatsPills(kind, valid, total) {
 
 function renderReportsHabits() {
   const wrap = h('div');
-  const active = state.habits.filter((x) => !x.archivedAt);
+  const active = habitsSorted(state.habits.filter((x) => !x.archivedAt));
 
   if (active.length === 0) {
     wrap.appendChild(h('p', { class: 'small muted' },
@@ -2850,9 +3156,20 @@ function renderSettings() {
   return view;
 }
 
-function exportJSON() {
+async function exportJSON() {
   try {
-    const data = JSON.stringify(state, null, 2);
+    // Collect any diary photos from IndexedDB as base64 so the file is portable.
+    const photoKeys = await listPhotoKeys();
+    const photos = {};
+    for (const key of photoKeys) {
+      const blob = await getPhoto(key);
+      if (blob) photos[key] = await blobToBase64(blob);
+    }
+    const payload = {
+      ...state,
+      _photos: Object.keys(photos).length ? photos : undefined,
+    };
+    const data = JSON.stringify(payload, null, 2);
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = h('a', {
@@ -2910,6 +3227,131 @@ function renderBackupNudge() {
   );
 }
 
+// ---- Photo storage (IndexedDB) ----------------------------------------------
+
+const PHOTO_DB = 'tempo-photos';
+const PHOTO_STORE = 'days';
+const PHOTO_MAX_DIM = 1200;
+const PHOTO_QUALITY = 0.85;
+
+function openPhotoDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(PHOTO_DB, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(PHOTO_STORE)) {
+        db.createObjectStore(PHOTO_STORE);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function putPhoto(dayKey, blob) {
+  const db = await openPhotoDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PHOTO_STORE, 'readwrite');
+    tx.objectStore(PHOTO_STORE).put(blob, dayKey);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function getPhoto(dayKey) {
+  try {
+    const db = await openPhotoDB();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(PHOTO_STORE, 'readonly');
+      const req = tx.objectStore(PHOTO_STORE).get(dayKey);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  } catch { return null; }
+}
+
+async function deletePhoto(dayKey) {
+  const db = await openPhotoDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PHOTO_STORE, 'readwrite');
+    tx.objectStore(PHOTO_STORE).delete(dayKey);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function listPhotoKeys() {
+  try {
+    const db = await openPhotoDB();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(PHOTO_STORE, 'readonly');
+      const req = tx.objectStore(PHOTO_STORE).getAllKeys();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+  } catch { return []; }
+}
+
+async function clearAllPhotos() {
+  try {
+    const db = await openPhotoDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(PHOTO_STORE, 'readwrite');
+      tx.objectStore(PHOTO_STORE).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {}
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+function base64ToBlob(base64, type = 'image/jpeg') {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type });
+}
+
+async function downscaleImage(file) {
+  const img = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = () => reject(new Error('image load failed'));
+      i.src = reader.result;
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+  let { width, height } = img;
+  const max = Math.max(width, height);
+  if (max > PHOTO_MAX_DIM) {
+    const scale = PHOTO_MAX_DIM / max;
+    width = Math.round(width * scale);
+    height = Math.round(height * scale);
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => blob ? resolve(blob) : reject(new Error('canvas encode failed')),
+      'image/jpeg',
+      PHOTO_QUALITY,
+    );
+  });
+}
+
 // ---- Danger zone (full device reset) ----------------------------------------
 
 function renderDangerZone() {
@@ -2946,6 +3388,7 @@ async function deleteAllData() {
 
     // Wipe persisted state.
     try { localStorage.removeItem(STORAGE_KEY); } catch {}
+    try { await clearAllPhotos(); } catch {}
     try { navigator.clearAppBadge?.(); } catch {}
 
     // Reset in-memory state.
@@ -2983,7 +3426,7 @@ function handleImport(file) {
   if (!file) return;
   const reader = new FileReader();
   reader.onerror = () => toast('Could not read file');
-  reader.onload = () => {
+  reader.onload = async () => {
     let data;
     try {
       data = JSON.parse(reader.result);
@@ -3001,10 +3444,16 @@ function handleImport(file) {
     }
     const habitCount = data.habits.length;
     const dayCount = Object.keys(data.logs).length;
+    const photoCount = data._photos ? Object.keys(data._photos).length : 0;
+    const photoLine = photoCount ? `, ${photoCount} photo${photoCount === 1 ? '' : 's'}` : '';
     const ok = confirm(
-      `Import ${habitCount} habit${habitCount === 1 ? '' : 's'} and ${dayCount} day log${dayCount === 1 ? '' : 's'}?\n\nThis replaces your current data.`,
+      `Import ${habitCount} habit${habitCount === 1 ? '' : 's'}, ${dayCount} day log${dayCount === 1 ? '' : 's'}${photoLine}?\n\nThis replaces your current data.`,
     );
     if (!ok) return;
+
+    // Extract photos before storing state (so they don't live in localStorage).
+    const photos = data._photos || {};
+    delete data._photos;
 
     state = {
       ...defaultState(),
@@ -3012,6 +3461,18 @@ function handleImport(file) {
       settings: { ...defaultState().settings, ...(data.settings || {}) },
     };
     save();
+
+    // Wipe any existing photos, then replay from the backup.
+    try {
+      await clearAllPhotos();
+      for (const [key, base64] of Object.entries(photos)) {
+        if (typeof base64 !== 'string') continue;
+        try { await putPhoto(key, base64ToBlob(base64)); } catch {}
+      }
+    } catch (err) {
+      console.warn('Photo import partial failure', err);
+    }
+
     render();
     toast('Imported');
   };
@@ -3203,6 +3664,82 @@ function renderDiaryStep() {
   wrap.appendChild(renderDiaryField(log.diary, 'good', 'One good thing', 'e.g. Coffee with Alex was lovely.'));
   wrap.appendChild(renderDiaryField(log.diary, 'challenge', 'One challenge or learning', 'e.g. Struggled to focus after lunch.'));
 
+  wrap.appendChild(renderDiaryPhotoField(log));
+
+  return wrap;
+}
+
+function renderDiaryPhotoField(log) {
+  const wrap = h('div');
+  wrap.appendChild(h('label', 'Photo (optional)'));
+
+  const preview = h('div', { class: 'diary-photo-preview' });
+  const input = h('input', {
+    type: 'file',
+    accept: 'image/*',
+    style: { display: 'none' },
+  });
+  const pickBtn = h('button', {
+    type: 'button',
+    class: 'block',
+    onClick: () => input.click(),
+  }, log.diary?.hasPhoto ? 'Replace photo' : 'Add a photo');
+
+  let currentUrl = null;
+  async function refreshPreview() {
+    preview.replaceChildren();
+    if (currentUrl) { URL.revokeObjectURL(currentUrl); currentUrl = null; }
+    if (!log.diary?.hasPhoto) {
+      pickBtn.textContent = 'Add a photo';
+      return;
+    }
+    const blob = await getPhoto(currentDayKey());
+    if (!blob) {
+      log.diary.hasPhoto = false;
+      save();
+      pickBtn.textContent = 'Add a photo';
+      return;
+    }
+    currentUrl = URL.createObjectURL(blob);
+    preview.appendChild(h('img', {
+      src: currentUrl,
+      alt: 'Today\'s diary photo',
+    }));
+    preview.appendChild(h('button', {
+      type: 'button',
+      class: 'ghost small',
+      style: { marginTop: '6px' },
+      onClick: async () => {
+        await deletePhoto(currentDayKey());
+        log.diary.hasPhoto = false;
+        save();
+        await refreshPreview();
+      },
+    }, 'Remove photo'));
+    pickBtn.textContent = 'Replace photo';
+  }
+
+  input.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const blob = await downscaleImage(file);
+      await putPhoto(currentDayKey(), blob);
+      if (!log.diary) log.diary = { good: '', challenge: '' };
+      log.diary.hasPhoto = true;
+      save();
+      await refreshPreview();
+    } catch (err) {
+      console.error(err);
+      toast('Could not save that photo');
+    }
+  });
+
+  wrap.appendChild(pickBtn);
+  wrap.appendChild(input);
+  wrap.appendChild(preview);
+  refreshPreview();
   return wrap;
 }
 
@@ -3292,7 +3829,7 @@ function renderHabitsStep() {
   wrap.appendChild(h('p', { class: 'small muted', style: { marginBottom: '12px' } },
     'Check off what happened. Skip any you don\'t want to track today.'));
 
-  const active = state.habits.filter((x) => !x.archivedAt);
+  const active = habitsSorted(state.habits.filter((x) => !x.archivedAt));
   if (active.length === 0) {
     wrap.appendChild(h('p', 'No habits yet. Add some in the Habits tab.'));
     return wrap;
@@ -3655,6 +4192,7 @@ function wireThemeMediaListener() {
 }
 
 function init() {
+  ensureHabitOrders();
   applyTheme();
   wireThemeMediaListener();
   wireTabbar();

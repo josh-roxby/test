@@ -215,6 +215,18 @@ state.countdowns = [
 
 ---
 
+# Phase 5 — Entry flow (E-block)
+
+**Branch:** `feat/phase-5-entry-flow`
+
+- [x] E-M. Habit templates (Morning / Sleep / Focus / Kindness) shown in Habits empty state
+- [x] E-P. Habit reorder — `order` field + up/down arrows in Manage; sorted lists everywhere
+- [x] E-N. Quick-log pill on Today (tick / +1) with Undo toast; card body still opens detail
+- [x] E-O. Swipe gestures on Today habit cards (right = log, left = clear) with color hint
+- [x] E-Q. Photo on diary via IndexedDB (auto-downscale to 1200px, included in export/import, cleared by Danger Zone)
+
+---
+
 # Phase 3 — Home refinement, At a glance, Fast wins
 
 **Branch:** `feat/phase-3-build`
