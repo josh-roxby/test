@@ -1116,18 +1116,81 @@ function quickLogHabit(habit) {
   viewHabit(habit.id);
 }
 
+function clearHabitToday(habit) {
+  const log = state.logs[currentDayKey()];
+  if (!log?.habits || log.habits[habit.id] === undefined) return;
+  const prev = log.habits[habit.id];
+  delete log.habits[habit.id];
+  save();
+  render();
+  toast('Cleared', {
+    action: 'Undo',
+    onAction: () => {
+      log.habits[habit.id] = prev;
+      save();
+      render();
+    },
+  });
+}
+
+// Attach horizontal swipe handlers to a habit card. Swipe right → quick-log,
+// swipe left → clear today. Vertical-majority moves fall through to scrolling.
+function attachHabitSwipe(card, habit) {
+  let startX = 0, startY = 0, dx = 0, dy = 0, engaged = false;
+  const THRESHOLD = 60;
+
+  card.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) return;
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    dx = 0; dy = 0; engaged = false;
+    card.style.transition = 'none';
+  }, { passive: true });
+
+  card.addEventListener('touchmove', (e) => {
+    if (e.touches.length !== 1) return;
+    dx = e.touches[0].clientX - startX;
+    dy = e.touches[0].clientY - startY;
+    if (!engaged && Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      engaged = true;
+    }
+    if (engaged) {
+      e.preventDefault();
+      card.style.transform = `translateX(${dx * 0.6}px)`;
+      card.dataset.swipe = dx > 0 ? 'right' : 'left';
+    }
+  }, { passive: false });
+
+  const reset = () => {
+    card.style.transition = 'transform 0.2s ease';
+    card.style.transform = '';
+    delete card.dataset.swipe;
+    engaged = false;
+  };
+
+  card.addEventListener('touchend', () => {
+    if (engaged && Math.abs(dx) > THRESHOLD) {
+      if (dx > 0) quickLogHabit(habit);
+      else clearHabitToday(habit);
+    }
+    reset();
+  });
+
+  card.addEventListener('touchcancel', reset);
+}
+
 function renderHomeHabitCard(habit) {
   const today = currentDayKey();
   const done = isHabitDoneForDay(habit, today);
   const streak = currentStreak(habit);
   const logged = habitValueForDay(habit, today) !== undefined;
 
-  return h('div', {
+  const card = h('div', {
       class: `habit ${habit.kind}${done ? ' done' : ''}`,
       style: { '--habit-color': habit.color },
       role: 'button',
       tabindex: '0',
-      'aria-label': `${habit.title} — open details`,
+      'aria-label': `${habit.title} — open details (swipe right to log, left to clear)`,
       onClick: () => viewHabit(habit.id),
     },
     h('div', { class: 'stripe' }),
@@ -1152,6 +1215,9 @@ function renderHomeHabitCard(habit) {
       },
     }, todayStateText(habit)),
   );
+
+  attachHabitSwipe(card, habit);
+  return card;
 }
 
 function renderHeatmap(habit) {

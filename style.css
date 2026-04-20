@@ -198,6 +198,21 @@ label { display: block; font-size: 0.85rem; color: var(--muted); margin: 12px 0 
 .habit.done .state { color: var(--good); font-weight: 700; }
 .habit.bad.done .state { color: var(--good); font-weight: 700; }
 
+/* Swipe feedback on Today habit cards */
+.habit {
+  position: relative;
+  z-index: 1;
+  touch-action: pan-y; /* let vertical scroll through, we handle horizontal */
+}
+.habit[data-swipe="right"] {
+  background: color-mix(in oklab, var(--good) 14%, var(--surface));
+  border-color: color-mix(in oklab, var(--good) 45%, var(--border));
+}
+.habit[data-swipe="left"] {
+  background: color-mix(in oklab, var(--bad) 14%, var(--surface));
+  border-color: color-mix(in oklab, var(--bad) 45%, var(--border));
+}
+
 /* Quick-log pill (interactive state on Today cards) */
 .habit-state-btn {
   background: var(--surface-2);
