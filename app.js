@@ -1816,6 +1816,20 @@ function renderDiaryCard(dayKey) {
     }, h('span', { class: 'kicker' }, 'Challenge'), ' ', diary.challenge));
   }
 
+  if (diary.hasPhoto) {
+    const photoEl = h('div', { class: 'diary-photo-thumb' });
+    card.appendChild(photoEl);
+    getPhoto(dayKey).then((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      photoEl.replaceChildren(h('img', {
+        src: url,
+        alt: 'Diary photo',
+        onLoad: () => { /* leave URL alive for the card's life */ },
+      }));
+    });
+  }
+
   if (isToday) {
     card.appendChild(h('div', {
       class: 'row',
@@ -3142,9 +3156,20 @@ function renderSettings() {
   return view;
 }
 
-function exportJSON() {
+async function exportJSON() {
   try {
-    const data = JSON.stringify(state, null, 2);
+    // Collect any diary photos from IndexedDB as base64 so the file is portable.
+    const photoKeys = await listPhotoKeys();
+    const photos = {};
+    for (const key of photoKeys) {
+      const blob = await getPhoto(key);
+      if (blob) photos[key] = await blobToBase64(blob);
+    }
+    const payload = {
+      ...state,
+      _photos: Object.keys(photos).length ? photos : undefined,
+    };
+    const data = JSON.stringify(payload, null, 2);
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = h('a', {
@@ -3202,6 +3227,131 @@ function renderBackupNudge() {
   );
 }
 
+// ---- Photo storage (IndexedDB) ----------------------------------------------
+
+const PHOTO_DB = 'tempo-photos';
+const PHOTO_STORE = 'days';
+const PHOTO_MAX_DIM = 1200;
+const PHOTO_QUALITY = 0.85;
+
+function openPhotoDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(PHOTO_DB, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(PHOTO_STORE)) {
+        db.createObjectStore(PHOTO_STORE);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function putPhoto(dayKey, blob) {
+  const db = await openPhotoDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PHOTO_STORE, 'readwrite');
+    tx.objectStore(PHOTO_STORE).put(blob, dayKey);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function getPhoto(dayKey) {
+  try {
+    const db = await openPhotoDB();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(PHOTO_STORE, 'readonly');
+      const req = tx.objectStore(PHOTO_STORE).get(dayKey);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  } catch { return null; }
+}
+
+async function deletePhoto(dayKey) {
+  const db = await openPhotoDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PHOTO_STORE, 'readwrite');
+    tx.objectStore(PHOTO_STORE).delete(dayKey);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function listPhotoKeys() {
+  try {
+    const db = await openPhotoDB();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(PHOTO_STORE, 'readonly');
+      const req = tx.objectStore(PHOTO_STORE).getAllKeys();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+  } catch { return []; }
+}
+
+async function clearAllPhotos() {
+  try {
+    const db = await openPhotoDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(PHOTO_STORE, 'readwrite');
+      tx.objectStore(PHOTO_STORE).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {}
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+function base64ToBlob(base64, type = 'image/jpeg') {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type });
+}
+
+async function downscaleImage(file) {
+  const img = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = () => reject(new Error('image load failed'));
+      i.src = reader.result;
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+  let { width, height } = img;
+  const max = Math.max(width, height);
+  if (max > PHOTO_MAX_DIM) {
+    const scale = PHOTO_MAX_DIM / max;
+    width = Math.round(width * scale);
+    height = Math.round(height * scale);
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => blob ? resolve(blob) : reject(new Error('canvas encode failed')),
+      'image/jpeg',
+      PHOTO_QUALITY,
+    );
+  });
+}
+
 // ---- Danger zone (full device reset) ----------------------------------------
 
 function renderDangerZone() {
@@ -3238,6 +3388,7 @@ async function deleteAllData() {
 
     // Wipe persisted state.
     try { localStorage.removeItem(STORAGE_KEY); } catch {}
+    try { await clearAllPhotos(); } catch {}
     try { navigator.clearAppBadge?.(); } catch {}
 
     // Reset in-memory state.
@@ -3275,7 +3426,7 @@ function handleImport(file) {
   if (!file) return;
   const reader = new FileReader();
   reader.onerror = () => toast('Could not read file');
-  reader.onload = () => {
+  reader.onload = async () => {
     let data;
     try {
       data = JSON.parse(reader.result);
@@ -3293,10 +3444,16 @@ function handleImport(file) {
     }
     const habitCount = data.habits.length;
     const dayCount = Object.keys(data.logs).length;
+    const photoCount = data._photos ? Object.keys(data._photos).length : 0;
+    const photoLine = photoCount ? `, ${photoCount} photo${photoCount === 1 ? '' : 's'}` : '';
     const ok = confirm(
-      `Import ${habitCount} habit${habitCount === 1 ? '' : 's'} and ${dayCount} day log${dayCount === 1 ? '' : 's'}?\n\nThis replaces your current data.`,
+      `Import ${habitCount} habit${habitCount === 1 ? '' : 's'}, ${dayCount} day log${dayCount === 1 ? '' : 's'}${photoLine}?\n\nThis replaces your current data.`,
     );
     if (!ok) return;
+
+    // Extract photos before storing state (so they don't live in localStorage).
+    const photos = data._photos || {};
+    delete data._photos;
 
     state = {
       ...defaultState(),
@@ -3304,6 +3461,18 @@ function handleImport(file) {
       settings: { ...defaultState().settings, ...(data.settings || {}) },
     };
     save();
+
+    // Wipe any existing photos, then replay from the backup.
+    try {
+      await clearAllPhotos();
+      for (const [key, base64] of Object.entries(photos)) {
+        if (typeof base64 !== 'string') continue;
+        try { await putPhoto(key, base64ToBlob(base64)); } catch {}
+      }
+    } catch (err) {
+      console.warn('Photo import partial failure', err);
+    }
+
     render();
     toast('Imported');
   };
@@ -3495,6 +3664,82 @@ function renderDiaryStep() {
   wrap.appendChild(renderDiaryField(log.diary, 'good', 'One good thing', 'e.g. Coffee with Alex was lovely.'));
   wrap.appendChild(renderDiaryField(log.diary, 'challenge', 'One challenge or learning', 'e.g. Struggled to focus after lunch.'));
 
+  wrap.appendChild(renderDiaryPhotoField(log));
+
+  return wrap;
+}
+
+function renderDiaryPhotoField(log) {
+  const wrap = h('div');
+  wrap.appendChild(h('label', 'Photo (optional)'));
+
+  const preview = h('div', { class: 'diary-photo-preview' });
+  const input = h('input', {
+    type: 'file',
+    accept: 'image/*',
+    style: { display: 'none' },
+  });
+  const pickBtn = h('button', {
+    type: 'button',
+    class: 'block',
+    onClick: () => input.click(),
+  }, log.diary?.hasPhoto ? 'Replace photo' : 'Add a photo');
+
+  let currentUrl = null;
+  async function refreshPreview() {
+    preview.replaceChildren();
+    if (currentUrl) { URL.revokeObjectURL(currentUrl); currentUrl = null; }
+    if (!log.diary?.hasPhoto) {
+      pickBtn.textContent = 'Add a photo';
+      return;
+    }
+    const blob = await getPhoto(currentDayKey());
+    if (!blob) {
+      log.diary.hasPhoto = false;
+      save();
+      pickBtn.textContent = 'Add a photo';
+      return;
+    }
+    currentUrl = URL.createObjectURL(blob);
+    preview.appendChild(h('img', {
+      src: currentUrl,
+      alt: 'Today\'s diary photo',
+    }));
+    preview.appendChild(h('button', {
+      type: 'button',
+      class: 'ghost small',
+      style: { marginTop: '6px' },
+      onClick: async () => {
+        await deletePhoto(currentDayKey());
+        log.diary.hasPhoto = false;
+        save();
+        await refreshPreview();
+      },
+    }, 'Remove photo'));
+    pickBtn.textContent = 'Replace photo';
+  }
+
+  input.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const blob = await downscaleImage(file);
+      await putPhoto(currentDayKey(), blob);
+      if (!log.diary) log.diary = { good: '', challenge: '' };
+      log.diary.hasPhoto = true;
+      save();
+      await refreshPreview();
+    } catch (err) {
+      console.error(err);
+      toast('Could not save that photo');
+    }
+  });
+
+  wrap.appendChild(pickBtn);
+  wrap.appendChild(input);
+  wrap.appendChild(preview);
+  refreshPreview();
   return wrap;
 }
 

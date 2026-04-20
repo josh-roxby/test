@@ -410,6 +410,36 @@ label { display: block; font-size: 0.85rem; color: var(--muted); margin: 12px 0 
   border-color: color-mix(in oklab, var(--accent) 40%, var(--border));
 }
 
+/* Diary photo (check-in step preview + timeline thumbnail) */
+.diary-photo-preview {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.diary-photo-preview img {
+  max-width: 100%;
+  max-height: 260px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  object-fit: cover;
+}
+.diary-photo-thumb {
+  margin-top: 10px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  min-height: 80px;
+}
+.diary-photo-thumb img {
+  display: block;
+  width: 100%;
+  max-height: 200px;
+  object-fit: cover;
+}
+
 /* Habit template picker (empty-state of Habits tab) */
 .template-grid {
   display: grid;
